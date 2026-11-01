@@ -17,9 +17,9 @@ export default function Header({
     <header className="border-b border-slate-200/80 bg-white">
       <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="flex items-center gap-2 text-2xl font-black tracking-tight text-black drop-shadow-[0_2px_8px_rgba(15,23,42,0.08)] sm:text-3xl">
-            <span>SAMARTH</span>
-            <span className="text-black">DEALS</span>
+          <h1 className="flex items-center gap-2 text-2xl font-black tracking-tight sm:text-3xl">
+            <span className="text-[#000000]">SAMARTH</span>
+            <span className="text-[#000000]">DEALS</span>
           </h1>
           <nav aria-label="Primary navigation" className="flex flex-wrap items-center gap-3 text-sm font-semibold sm:gap-4">
             <button
