@@ -7,11 +7,11 @@ interface SearchBarProps {
 
 export default function SearchBar({ value, onQueryChange }: SearchBarProps) {
   return (
-    <label className="relative block w-full">
+    <label className="relative block w-full rounded-2xl border border-red-200 bg-red-50 shadow-[0_0_0_1px_rgba(239,68,68,0.03)] transition hover:border-red-300 focus-within:border-red-500 focus-within:bg-white focus-within:shadow-[0_0_0_4px_rgba(239,68,68,0.12)]">
       <span className="sr-only">Search deals</span>
       <svg
         aria-hidden="true"
-        className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400"
+        className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-red-500"
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -21,7 +21,7 @@ export default function SearchBar({ value, onQueryChange }: SearchBarProps) {
         <path strokeLinecap="round" d="m20 20-4.35-4.35" />
       </svg>
       <input
-        className="h-12 w-full rounded-2xl border border-slate-200 bg-[#f8fafc] py-3 pl-11 pr-4 text-sm text-slate-950 shadow-[0_0_0_1px_rgba(16,185,129,0.03)] outline-none transition placeholder:text-slate-400 hover:border-emerald-300 focus:border-emerald-400 focus:bg-white focus:shadow-[0_0_0_4px_rgba(16,185,129,0.12)]"
+        className="h-12 w-full rounded-2xl border-0 bg-transparent py-3 pl-11 pr-4 text-sm text-slate-950 outline-none transition placeholder:text-red-300"
         type="search"
         value={value}
         onInput={(event) => onQueryChange(event.currentTarget.value)}
