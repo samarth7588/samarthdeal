@@ -87,6 +87,11 @@ function queryProductIdentity(url: URL) {
 
 function pathProductIdentity(url: URL) {
   const segments = decodedPathSegments(url).map((segment) => segment.toLowerCase());
+  if (url.hostname === "blinkit.com" && segments[0] === "prn" && segments[1]) {
+    const productIdIndex = segments.indexOf("p", 2);
+    return `path:${segments[productIdIndex + 1] || segments[1]}`;
+  }
+
   const productSegmentNames = new Set([
     "product",
     "products",
@@ -143,7 +148,8 @@ export function identifyProductOrderUrl(value: string): ProductOrderLink | null 
   const pathIdentity = pathProductIdentity(url);
   const hasStructuredProductPath =
     /\/(?:dp|gp\/product|products?|items?|p|product-detail|product-details)(?:\/|$)/i.test(pathname) ||
-    /\/buy\/?$/i.test(pathname);
+    /\/buy\/?$/i.test(pathname) ||
+    (hostname === "blinkit.com" && /^\/prn\/[^/]+(?:\/|$)/i.test(pathname));
   const isKnownShortProductLink =
     (hostname === "amzn.in" && /^\/d\/[^/]+$/i.test(pathname)) ||
     (hostname === "fkrt.it" && /^\/[^/]+$/i.test(pathname)) ||

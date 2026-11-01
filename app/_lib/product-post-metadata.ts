@@ -470,10 +470,10 @@ export async function resolveProductPostMetadata(
       null,
 
     platform:
-      parsed.platform ||
       (productUrl
         ? platformFromUrl(productUrl)
         : "") ||
+      parsed.platform ||
       null,
 
     orderPrice:

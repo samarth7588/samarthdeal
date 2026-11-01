@@ -29,6 +29,14 @@ test("recognizes platform names from common retailer URLs", () => {
   );
 });
 
+test("prefers the retailer from the product link over a conflicting platform label", async () => {
+  const metadata = await resolveProductPostMetadata(
+    "Product: Example product\nPlatform: Amazon\nhttps://blinkit.com/prn/example-product",
+  );
+
+  assert.equal(metadata.platform, "Blinkit");
+});
+
 test("keeps missing prices null while preserving a real zero price", () => {
   assert.equal(nullablePrice(""), null);
   assert.equal(nullablePrice("0"), 0);

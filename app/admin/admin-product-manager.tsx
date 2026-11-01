@@ -126,7 +126,7 @@ export default function AdminProductManager({
     return products.map((post) => {
       const formUrl = getJayShakthiOrderFormUrl(post.description);
       const productLink = firstProductOrderLink(post.description);
-      const platform = post.platform?.trim() || productLink?.platform || "Platform not specified";
+      const platform = productLink?.platform || post.platform?.trim() || "Platform not specified";
 
       return (
       <article

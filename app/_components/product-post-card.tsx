@@ -16,7 +16,7 @@ export default function ProductPostCard({
   const isLive = post.status === "live";
   const detailUrl = `/products/${post.id}`;
   const productLink = firstProductOrderLink(post.description);
-  const platformName = post.platform?.trim() || productLink?.platform || "Platform not specified";
+  const platformName = productLink?.platform || post.platform?.trim() || "Platform not specified";
   const hasRatingKeyword = /rating|regular rating|rating deal/i.test(post.description);
 
   return (

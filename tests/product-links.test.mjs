@@ -62,6 +62,20 @@ test("recognizes structured product paths on external stores", () => {
   assert.equal(link.identity, "shop.example.com:path:copper-bottle");
 });
 
+test("recognizes Flipkart and Blinkit product links for platform badges", () => {
+  const flipkart = identifyProductOrderUrl(
+    "https://www.flipkart.com/product-name/p/itm12345",
+  );
+  const blinkit = identifyProductOrderUrl(
+    "https://blinkit.com/prn/product-name",
+  );
+
+  assert.ok(flipkart);
+  assert.equal(flipkart.platform, "Flipkart");
+  assert.ok(blinkit);
+  assert.equal(blinkit.platform, "Blinkit");
+});
+
 test("recognizes a known product short-link without guessing its platform", () => {
   const link = identifyProductOrderUrl("https://bitli.in/QyeGq8Q");
 

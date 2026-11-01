@@ -75,7 +75,7 @@ export default async function ProductPostPage({ params }: { params: Promise<{ id
   const isLive = post.status === "live";
   const dealInformation = extractDealInformation(post.description);
   const productLink = firstProductOrderLink(post.description);
-  const platformName = post.platform?.trim() || productLink?.platform || "Platform not specified";
+  const platformName = productLink?.platform || post.platform?.trim() || "Platform not specified";
   const structuredInformation = [
     ["Platform", platformName],
     ["Brand", post.brand ?? dealInformation.brand],
