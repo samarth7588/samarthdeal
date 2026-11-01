@@ -17,8 +17,9 @@ export default function Header({
     <header className="border-b border-slate-200/80 bg-white">
       <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="bg-gradient-to-r from-slate-800 via-blue-800 to-emerald-700 bg-clip-text text-2xl font-black tracking-tight text-transparent drop-shadow-[0_2px_8px_rgba(30,64,175,0.14)] sm:text-3xl">
-            SAMARTH DEALS
+          <h1 className="flex items-center gap-2 text-2xl font-black tracking-tight text-black drop-shadow-[0_2px_8px_rgba(15,23,42,0.08)] sm:text-3xl">
+            <span>SAMARTH</span>
+            <span className="text-black">DEALS</span>
           </h1>
           <nav aria-label="Primary navigation" className="flex flex-wrap items-center gap-3 text-sm font-semibold sm:gap-4">
             <button
@@ -40,11 +41,11 @@ export default function Header({
             </a>
           </nav>
         </div>
-        <label className="relative mt-4 block w-full">
+        <label className="relative mt-4 block w-full rounded-2xl border border-red-200 bg-red-50 shadow-[0_0_0_1px_rgba(239,68,68,0.03)] transition hover:border-red-300 focus-within:border-red-500 focus-within:bg-white focus-within:shadow-[0_0_0_4px_rgba(239,68,68,0.12)]">
           <span className="sr-only">Search deals</span>
           <svg
             aria-hidden="true"
-            className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-blue-600"
+            className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-red-500"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -54,7 +55,7 @@ export default function Header({
             <path strokeLinecap="round" d="m20 20-4.35-4.35" />
           </svg>
           <input
-            className="h-12 w-full rounded-2xl border border-slate-300 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-900 shadow-sm outline-none transition duration-300 placeholder:text-slate-500 hover:border-blue-400 focus:border-blue-500 focus:bg-white focus:shadow-[0_0_0_4px_rgba(59,130,246,0.14)] sm:h-14 sm:text-base"
+            className="h-12 w-full rounded-2xl border-0 bg-transparent py-3 pl-12 pr-4 text-sm text-slate-900 outline-none transition duration-300 placeholder:text-red-300 sm:h-14 sm:text-base"
             type="search"
             value={searchValue}
             onInput={(event) => onSearchChange(event.currentTarget.value)}
