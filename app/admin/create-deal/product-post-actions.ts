@@ -14,6 +14,7 @@ import type { CreateDealState } from "./state";
 
 const postStatuses = ["draft", "live", "over"] as const;
 type ProductPostStatus = (typeof postStatuses)[number];
+const publishTimeoutMs = 20_000;
 
 function textValue(formData: FormData, name: string) {
   const value = formData.get(name);
@@ -110,15 +111,24 @@ function unexpectedActionError(error: unknown, operation: "publish" | "update") 
 }
 
 export async function createProductPostAction(_previousState: CreateDealState, formData: FormData): Promise<CreateDealState> {
+  const timeoutSignal = AbortSignal.timeout(publishTimeoutMs);
   try {
-    return await createProductPost(formData);
+    const result = await createProductPost(formData, timeoutSignal);
+    if (timeoutSignal.aborted) {
+      return unauthorized("Publishing took too long. Check the product list before trying again.");
+    }
+    return result;
   } catch (error) {
+    if (timeoutSignal.aborted) {
+      logSupabaseError("Product publishing timed out.", error);
+      return unauthorized("Publishing took too long. Check the product list before trying again.");
+    }
     return unexpectedActionError(error, "publish");
   }
 }
 
-async function createProductPost(formData: FormData): Promise<CreateDealState> {
-  const { user, isAuthorized } = await getAdminSession();
+async function createProductPost(formData: FormData, timeoutSignal: AbortSignal): Promise<CreateDealState> {
+  const { user, isAuthorized } = await getAdminSession(timeoutSignal);
   if (!user) return unauthorized("Your session has expired. Please sign in again.");
   if (!isAuthorized) return unauthorized("You are not authorized to publish product posts.");
 
@@ -141,7 +151,7 @@ async function createProductPost(formData: FormData): Promise<CreateDealState> {
     return unauthorized("The image must be uploaded to the configured product-images bucket before publishing.");
   }
 
-  const supabase = await createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient(timeoutSignal);
   const fullPayload = {
     image_url: values.imageUrl,
     description: values.description,
@@ -184,6 +194,9 @@ async function createProductPost(formData: FormData): Promise<CreateDealState> {
     return unauthorized(insertErrorMessage(error));
   }
 
+  revalidatePath("/");
+  revalidatePath("/admin");
+  revalidatePath("/admin/create-deal");
   return { errorMessage: null, successMessage: "Product published successfully.", fieldErrors: {} };
 }
 
