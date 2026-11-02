@@ -101,7 +101,23 @@ function insertErrorMessage(error: unknown) {
   return "We could not publish this product post. Check the server log for the Supabase error code and message.";
 }
 
+function unexpectedActionError(error: unknown, operation: "publish" | "update") {
+  logSupabaseError(`Unable to ${operation} product post.`, error);
+  if (classifySupabaseError(error) === "network") {
+    return unauthorized("Supabase did not respond in time. Check your connection and try again.");
+  }
+  return unauthorized(`We could not ${operation} this product post. Check the server log for details.`);
+}
+
 export async function createProductPostAction(_previousState: CreateDealState, formData: FormData): Promise<CreateDealState> {
+  try {
+    return await createProductPost(formData);
+  } catch (error) {
+    return unexpectedActionError(error, "publish");
+  }
+}
+
+async function createProductPost(formData: FormData): Promise<CreateDealState> {
   const { user, isAuthorized } = await getAdminSession();
   if (!user) return unauthorized("Your session has expired. Please sign in again.");
   if (!isAuthorized) return unauthorized("You are not authorized to publish product posts.");
@@ -126,25 +142,6 @@ export async function createProductPostAction(_previousState: CreateDealState, f
   }
 
   const supabase = await createSupabaseServerClient();
-  const existing = await supabase
-    .from("product_posts")
-    .select("id")
-    .eq("image_url", values.imageUrl)
-    .eq("description", values.description)
-    .eq("status", values.status)
-    .limit(1)
-    .maybeSingle();
-  if (existing.data) {
-    const storageBucket = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET;
-    if (storageBucket) await removeProductImage(supabase, values.imageUrl, storageBucket);
-    revalidatePath("/");
-    revalidatePath("/admin");
-    revalidatePath("/admin/create-deal");
-    return { errorMessage: null, successMessage: "Product published successfully.", fieldErrors: {} };
-  }
-  if (existing.error && classifySupabaseError(existing.error) !== "rls") {
-    logSupabaseError("Unable to check for an existing product post before insert.", existing.error, "warn");
-  }
   const fullPayload = {
     image_url: values.imageUrl,
     description: values.description,
@@ -187,13 +184,18 @@ export async function createProductPostAction(_previousState: CreateDealState, f
     return unauthorized(insertErrorMessage(error));
   }
 
-  revalidatePath("/");
-  revalidatePath("/admin");
-  revalidatePath("/admin/create-deal");
   return { errorMessage: null, successMessage: "Product published successfully.", fieldErrors: {} };
 }
 
 export async function updateProductPostAction(_previousState: CreateDealState, formData: FormData): Promise<CreateDealState> {
+  try {
+    return await updateProductPost(formData);
+  } catch (error) {
+    return unexpectedActionError(error, "update");
+  }
+}
+
+async function updateProductPost(formData: FormData): Promise<CreateDealState> {
   const { user, isAuthorized } = await getAdminSession();
   if (!user) return unauthorized("Your session has expired. Please sign in again.");
   if (!isAuthorized) return unauthorized("You are not authorized to update product posts.");

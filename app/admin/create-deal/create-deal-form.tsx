@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   getOrderFormPostStatus,
@@ -81,10 +82,9 @@ export default function CreateDealForm({
   onSaved?: () => void;
 }) {
   const isEditing = Boolean(post);
-  const [state, formAction, isPending] = useActionState(
-    isEditing ? updateProductPostAction : createProductPostAction,
-    initialCreateDealState,
-  );
+  const [state, setState] = useState(initialCreateDealState);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const router = useRouter();
   const [clientError, setClientError] = useState<string | null>(null);
   const [description, setDescription] = useState(post?.description ?? "");
   const [metadata, setMetadata] = useState<ProductPostMetadata>(() => ({
@@ -103,7 +103,7 @@ export default function CreateDealForm({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const captionRef = useRef<HTMLTextAreaElement>(null);
-  const publishButtonRef = useRef<HTMLButtonElement>(null);
+  const submissionInProgressRef = useRef(false);
   const slotRequestRef = useRef(0);
   const slotAutoStatusAppliedRef = useRef(false);
   const safeState = normalizeCreateDealState(state);
@@ -134,6 +134,11 @@ export default function CreateDealForm({
     setClientError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, []);
+
+  useEffect(() => {
+    if (!previewUrl?.startsWith("blob:")) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
 
   useEffect(() => {
     const formUrl = getJayShakthiOrderFormUrl(description);
@@ -201,17 +206,6 @@ export default function CreateDealForm({
   }, [description, post?.status]);
 
   useEffect(() => {
-    if (!safeState.successMessage || isEditing) return;
-    const resetTimer = window.setTimeout(resetFormState, 0);
-    return () => window.clearTimeout(resetTimer);
-  }, [isEditing, resetFormState, safeState.successMessage]);
-
-  useEffect(() => {
-    if (!safeState.successMessage || !isEditing) return;
-    onSaved?.();
-  }, [isEditing, onSaved, safeState.successMessage]);
-
-  useEffect(() => {
     if (!editingPostId) return;
     const timer = window.setTimeout(() => {
       captionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -275,6 +269,41 @@ export default function CreateDealForm({
     setMetadata(nextDescription.trim() ? parseProductPostMessage(nextDescription) : emptyMetadata);
   }
 
+  async function submitProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isPublishing || submissionInProgressRef.current) return;
+
+    submissionInProgressRef.current = true;
+    setIsPublishing(true);
+    setClientError(null);
+    setState(initialCreateDealState);
+
+    try {
+      const formData = new FormData(event.currentTarget);
+      const action = isEditing ? updateProductPostAction : createProductPostAction;
+      const result = await action(state, formData);
+      setState(result);
+      if (result.successMessage) {
+        if (isEditing) {
+          onSaved?.();
+        } else {
+          resetFormState();
+          router.refresh();
+        }
+      }
+    } catch (error) {
+      console.error("Unable to submit product post.", error);
+      setState({
+        errorMessage: "The publishing request could not be completed. Check your connection and try again.",
+        successMessage: null,
+        fieldErrors: {},
+      });
+    } finally {
+      submissionInProgressRef.current = false;
+      setIsPublishing(false);
+    }
+  }
+
   const hasImage = Boolean(imageUrl);
   const hasDescription = Boolean(description.trim());
 
@@ -282,11 +311,8 @@ export default function CreateDealForm({
     <>
     <form
       ref={formRef}
-      action={formAction}
       className="space-y-8"
-      onSubmit={(event) => {
-        if (event.nativeEvent.submitter !== publishButtonRef.current) event.preventDefault();
-      }}
+      onSubmit={submitProduct}
     >
       {(clientError || safeState.errorMessage) && <p aria-live="polite" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">{clientError || safeState.errorMessage}</p>}
       {safeState.successMessage && <p aria-live="polite" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{safeState.successMessage}</p>}
@@ -342,7 +368,7 @@ export default function CreateDealForm({
 
       <input name="status" type="hidden" value={selectedStatus} />
 
-      <button ref={publishButtonRef} className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-950 px-4 text-base font-extrabold uppercase text-white shadow-lg shadow-slate-950/15 transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-950/20 disabled:cursor-not-allowed disabled:opacity-60" disabled={isPending || uploadState === "uploading" || slotDetectionState === "checking" || !hasImage || !hasDescription} type="submit">{isPending ? (isEditing ? "Saving changes..." : "Publishing product...") : (isEditing ? "Save Changes" : "Publish Product")}</button>
+      <button className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-950 px-4 text-base font-extrabold uppercase text-white shadow-lg shadow-slate-950/15 transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-950/20 disabled:cursor-not-allowed disabled:opacity-60" disabled={isPublishing || uploadState === "uploading" || slotDetectionState === "checking" || !hasImage || !hasDescription} type="submit">{isPublishing ? (isEditing ? "Saving changes..." : "Publishing product...") : (isEditing ? "Save Changes" : "Publish Product")}</button>
     </form>
     {duplicateMatch && (
       <DuplicateProductCard
