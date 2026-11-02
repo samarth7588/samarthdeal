@@ -7,8 +7,8 @@ export type AdminSession = {
   isAuthorized: boolean;
 };
 
-export async function getAdminSession(): Promise<AdminSession> {
-  const supabase = await createSupabaseServerClient();
+export async function getAdminSession(signal?: AbortSignal): Promise<AdminSession> {
+  const supabase = await createSupabaseServerClient(signal);
   const {
     data: { user },
   } = await supabase.auth.getUser();
