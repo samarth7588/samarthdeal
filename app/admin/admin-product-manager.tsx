@@ -11,7 +11,8 @@ import {
   setProductPostStatusAction,
 } from "./create-deal/product-post-actions";
 import { getJayShakthiOrderFormUrl } from "../_lib/order-form-slots";
-import { firstProductOrderLink } from "../_lib/product-links";
+import { productRetailerLinks } from "../_lib/product-links";
+import { assignProductSerialNumbers } from "../_lib/product-post-serial-numbers";
 import { formatPrice } from "../_lib/formatters";
 import { numericPrice } from "../_lib/pricing";
 import ProductPostSlotCount from "../_components/product-post-slot-count";
@@ -68,6 +69,7 @@ export default function AdminProductManager({
   const statusUpdatesInProgress = useRef(new Set<string>());
   const normalizedQuery = query.trim().toLowerCase();
   const editingPost = posts.find((post) => post.id === editingPostId) ?? null;
+  const serialNumbers = useMemo(() => assignProductSerialNumbers(posts), [posts]);
   const matchesSearch = useCallback((post: AdminProductPost) => {
     if (!normalizedQuery) return true;
     return [
@@ -125,18 +127,46 @@ export default function AdminProductManager({
   function renderProducts(products: AdminProductPost[]) {
     return products.map((post) => {
       const formUrl = getJayShakthiOrderFormUrl(post.description);
-      const productLink = firstProductOrderLink(post.description);
-      const platform = post.platform?.trim() || productLink?.platform || "Platform not specified";
+      const productLink = productRetailerLinks(post.description)[0] ?? null;
+      const serialNumber = serialNumbers.get(post.id)!;
 
       return (
       <article
         className="my-3 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
         key={post.id}
       >
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <div className="relative h-20 w-20 shrink-0">
+          <a
+            aria-label={`View image for product ${serialNumber}`}
+            className="flex h-full w-full items-center justify-center overflow-hidden rounded-xl bg-slate-50 ring-1 ring-inset ring-slate-200 focus:outline-none focus:ring-4 focus:ring-blue-500/20"
+            href={post.image_url}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            <img
+              alt={`Product ${serialNumber}`}
+              className="h-full w-full object-contain"
+              loading="lazy"
+              src={post.image_url}
+            />
+          </a>
+          <span
+            className={`absolute left-1 top-1 rounded-full px-2 py-1 text-[9px] font-black tracking-[0.1em] shadow-sm ${
+              post.status === "live"
+                ? "bg-emerald-500 text-white"
+                : post.status === "over"
+                  ? "bg-slate-800 text-white"
+                  : "bg-amber-500 text-white"
+            }`}
+          >
+            {post.status.toUpperCase()}
+          </span>
+          </div>
+          <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-800">
-              #{post.serial_number ?? "—"}
+              #{serialNumber}
             </span>
             <h4 className="min-w-0 break-words text-sm font-bold text-slate-950">
               {post.product_name || "Product"}
@@ -151,21 +181,18 @@ export default function AdminProductManager({
                 Less {formatPrice(post.less_price)}
               </span>
             )}
-            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800">{platform}</span>
-            {productLink && (
+            {productLink?.platform && (
               <a
-                aria-label={`Open ${platform} product link`}
-                className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-800 transition hover:bg-blue-200"
+                aria-label={`Open ${productLink.platform} product link`}
+                className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800 transition hover:bg-blue-100"
                 href={productLink.url}
                 rel="noopener noreferrer"
                 target="_blank"
+                title={`Open ${productLink.platform} product link`}
               >
-                🔥
+                {productLink.platform} <span aria-hidden="true">🔥</span>
               </a>
             )}
-            <span className={`rounded-full px-2.5 py-1 text-[10px] font-black tracking-wide ${post.status === "live" ? "bg-emerald-100 text-emerald-800" : post.status === "over" ? "bg-slate-200 text-slate-700" : "bg-amber-100 text-amber-800"}`}>
-              {post.status.toUpperCase()}
-            </span>
           </div>
           <ProductPostSlotCount
             className="mt-2"
@@ -173,6 +200,7 @@ export default function AdminProductManager({
             formUrl={formUrl}
             onStatusDetected={(status) => void syncAutoDetectedStatus(post.id, status)}
           />
+          </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <button
@@ -190,13 +218,10 @@ export default function AdminProductManager({
           >
             Edit
           </button>
-          {post.status === "over" && formUrl ? (
-            <span className="rounded-xl bg-slate-200 px-3 py-2 text-xs font-black text-slate-700">OVER</span>
-          ) : post.status === "live" ? (
-            <StatusButton postId={post.id} status="over" />
-          ) : (
-            <StatusButton postId={post.id} status="live" />
-          )}
+          <StatusButton
+            postId={post.id}
+            status={post.status === "live" ? "over" : "live"}
+          />
           <DeleteProductPostButton
             deleteAction={deleteProductPostFormAction}
             postId={post.id}

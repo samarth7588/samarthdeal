@@ -57,7 +57,7 @@ async function normalizePost(row: Record<string, unknown>): Promise<AdminProduct
     description,
     product_name: localName || null,
     brand,
-    platform: productLink?.platform || (typeof row.platform === "string" ? row.platform : parsed.platform || null),
+    platform: productLink?.platform || null,
     order_price: typeof row.order_price === "number" || typeof row.order_price === "string" ? row.order_price : null,
     less_price: typeof row.less_price === "number" || typeof row.less_price === "string" ? row.less_price : null,
     rating: validRating(row.rating),

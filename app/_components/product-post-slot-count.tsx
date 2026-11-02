@@ -17,7 +17,8 @@ export default function ProductPostSlotCount({
 }) {
   const [availability, setAvailability] =
     useState<OrderFormSlotAvailability | null>(null);
-  const [unavailable, setUnavailable] = useState(false);
+  const [availabilityUrl, setAvailabilityUrl] = useState<string | null>(null);
+  const [unavailableUrl, setUnavailableUrl] = useState<string | null>(null);
   const onStatusDetectedRef = useRef(onStatusDetected);
 
   useEffect(() => {
@@ -29,8 +30,16 @@ export default function ProductPostSlotCount({
 
     const requestedFormUrl = formUrl;
     const controller = new AbortController();
+    let active = true;
 
     async function loadSlots() {
+      function markUnavailable() {
+        setAvailability(null);
+        setAvailabilityUrl(requestedFormUrl);
+        setUnavailableUrl(requestedFormUrl);
+        onStatusDetectedRef.current?.("over");
+      }
+
       try {
         const response = await fetch(
           `/api/product-post-slots?url=${encodeURIComponent(requestedFormUrl)}`,
@@ -38,35 +47,56 @@ export default function ProductPostSlotCount({
         );
 
         if (!response.ok) {
-          setUnavailable(true);
+          if (active) markUnavailable();
           return;
         }
 
-        const result = (await response.json()) as {
-          slots: OrderFormSlotAvailability | null;
-        };
-        setAvailability(result.slots);
-        setUnavailable(!result.slots);
-        const detectedStatus = getOrderFormPostStatus(result.slots);
+        const result: unknown = await response.json();
+        if (!active || !isSlotResponseForUrl(result, requestedFormUrl)) {
+          if (active) {
+            markUnavailable();
+          }
+          return;
+        }
+
+        const slots = result.slots;
+        if (!slots || slots.slots.length === 0) {
+          markUnavailable();
+          return;
+        }
+
+        setAvailability(slots && slots.slots.length > 0 ? slots : null);
+        setAvailabilityUrl(requestedFormUrl);
+        setUnavailableUrl(null);
+        const detectedStatus = getOrderFormPostStatus(slots);
         if (detectedStatus && detectedStatus !== currentStatus) {
           onStatusDetectedRef.current?.(detectedStatus);
         }
       } catch {
-        if (!controller.signal.aborted) setUnavailable(true);
+        if (!controller.signal.aborted && active) {
+          markUnavailable();
+        }
       }
     }
 
     void loadSlots();
+    const refreshTimer = window.setInterval(() => void loadSlots(), 30_000);
 
-    return () => controller.abort();
+    return () => {
+      active = false;
+      window.clearInterval(refreshTimer);
+      controller.abort();
+    };
   }, [currentStatus, formUrl]);
 
   if (!formUrl) return null;
+  const currentAvailability = availabilityUrl === formUrl ? availability : null;
+  const unavailable = unavailableUrl === formUrl;
 
   return (
     <div aria-live="polite" className={`${className} flex flex-wrap gap-1.5`}>
-      {availability
-        ? availability.slots.map((slot) => (
+      {currentAvailability
+        ? currentAvailability.slots.map((slot) => (
             <span
               className={`w-fit rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide md:text-xs ${
                 slot.availableSlots > 0
@@ -85,4 +115,39 @@ export default function ProductPostSlotCount({
           )}
     </div>
   );
+}
+
+function isSlotResponseForUrl(
+  value: unknown,
+  requestedFormUrl: string,
+): value is { slots: OrderFormSlotAvailability | null } {
+  if (!value || typeof value !== "object" || !("slots" in value)) return false;
+  const slots = value.slots;
+  if (slots === null) return true;
+  if (!slots || typeof slots !== "object" || !("formUrl" in slots) || !("slots" in slots)) {
+    return false;
+  }
+
+  try {
+    if (
+      typeof slots.formUrl !== "string" ||
+      new URL(slots.formUrl).toString() !== new URL(requestedFormUrl).toString() ||
+      !Array.isArray(slots.slots)
+    ) {
+      return false;
+    }
+    return slots.slots.every(
+      (slot) =>
+        slot &&
+        typeof slot === "object" &&
+        "dealType" in slot &&
+        typeof slot.dealType === "string" &&
+        "availableSlots" in slot &&
+        typeof slot.availableSlots === "number" &&
+        Number.isSafeInteger(slot.availableSlots) &&
+        slot.availableSlots >= 0,
+    );
+  } catch {
+    return false;
+  }
 }

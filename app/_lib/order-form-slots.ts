@@ -44,19 +44,66 @@ function isJayShakthiOrderForm(url: URL) {
   return url.protocol === "https:" && hostname === jayShakthiOrderFormHost && pathname === "/orderform";
 }
 
+export function isJayShakthiOrderFormUrl(value: string) {
+  try {
+    return isJayShakthiOrderForm(new URL(value));
+  } catch {
+    return false;
+  }
+}
+
+function isExplicitOrderFormLabel(description: string, url: string) {
+  let index = description.indexOf(url);
+  while (index >= 0) {
+    const prefix = description.slice(Math.max(0, index - 180), index);
+    const recentLines = prefix.split(/\r?\n/).slice(-2).join(" ");
+    const labelContext = recentLines
+      .replace(/\[\s*[^\]]+\s*\]\(\s*$/i, "")
+      .replace(/[*_`]/g, " ");
+    if (/\b(?:order\s*form(?:\s+link)?|order\s+link)\s*[:：-]?\s*$/i.test(labelContext.trim())) {
+      return true;
+    }
+    index = description.indexOf(url, index + url.length);
+  }
+  return false;
+}
+
+function productCodesInDescription(description: string) {
+  const codes = [...description.matchAll(/^\s*[*_`]*\s*(?:product\s+)?code\s*[*_`]*\s*[:：-]\s*([^\r\n]+)/gim)]
+    .map((match) => match[1].trim().replace(/[*_`]+$/g, "").trim().toLowerCase())
+    .filter(Boolean);
+  return new Set(codes);
+}
+
 export function getJayShakthiOrderFormUrl(description: string) {
   const normalizedDescription = decodeText(description);
-  const candidates = normalizedDescription.match(/https?:\/\/[^\s<>"'`]+/gi) ?? [];
+  const candidates = (normalizedDescription.match(/https?:\/\/[^\s<>"'`)\]]+/gi) ?? [])
+    .flatMap((raw) => {
+      const normalizedUrl = normalizeUrl(raw);
+      try {
+        const url = new URL(normalizedUrl);
+        return isJayShakthiOrderForm(url)
+          ? [{ raw, value: url.toString(), url }]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+  const uniqueCandidates = [
+    ...new Map(candidates.map((candidate) => [candidate.value, candidate])).values(),
+  ];
+  const productCodes = productCodesInDescription(normalizedDescription);
+  const codeMatches = uniqueCandidates.filter(({ url }) => {
+    const formCode = url.searchParams.get("product_code")?.trim().toLowerCase();
+    return Boolean(formCode && productCodes.has(formCode));
+  });
+  if (codeMatches.length === 1) return codeMatches[0].value;
+  if (codeMatches.length > 1) return null;
 
-  for (const candidate of candidates) {
-    const normalizedUrl = normalizeUrl(candidate);
-    try {
-      const url = new URL(normalizedUrl);
-      if (isJayShakthiOrderForm(url)) return url.toString();
-    } catch {
-      // Keep looking; malformed links elsewhere in a message must not hide a valid order form.
-    }
-  }
+  const labeled = uniqueCandidates.filter(({ raw }) =>
+    isExplicitOrderFormLabel(normalizedDescription, raw),
+  );
+  if (labeled.length === 1) return labeled[0].value;
 
   return null;
 }
@@ -114,8 +161,7 @@ function slotsFromOrderFormOption(html: string, productCode: string) {
 
 export function parseJayShakthiOrderFormSlots(html: string, productCode?: string): OrderFormSlot[] {
   if (productCode) {
-    const optionSlots = slotsFromOrderFormOption(html, productCode);
-    if (optionSlots.length > 0) return optionSlots;
+    return slotsFromOrderFormOption(html, productCode);
   }
 
   const text = plainTextFromHtml(html);
@@ -139,10 +185,7 @@ export function parseJayShakthiOrderFormSlots(html: string, productCode?: string
   return slots;
 }
 
-export async function getJayShakthiOrderFormSlots(description: string): Promise<OrderFormSlotAvailability | null> {
-  const formUrl = getJayShakthiOrderFormUrl(description);
-  if (!formUrl) return null;
-
+async function fetchJayShakthiOrderFormSlots(formUrl: string): Promise<OrderFormSlotAvailability | null> {
   try {
     const response = await fetch(formUrl, {
       cache: "no-store",
@@ -159,4 +202,14 @@ export async function getJayShakthiOrderFormSlots(description: string): Promise<
     // The product card remains usable when the external order-form site is unavailable.
     return null;
   }
+}
+
+export async function getJayShakthiOrderFormSlots(description: string): Promise<OrderFormSlotAvailability | null> {
+  const formUrl = getJayShakthiOrderFormUrl(description);
+  return formUrl ? fetchJayShakthiOrderFormSlots(formUrl) : null;
+}
+
+export async function getJayShakthiOrderFormSlotsForUrl(value: string): Promise<OrderFormSlotAvailability | null> {
+  if (!isJayShakthiOrderFormUrl(value)) return null;
+  return fetchJayShakthiOrderFormSlots(new URL(value).toString());
 }
