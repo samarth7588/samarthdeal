@@ -3,27 +3,32 @@ import Link from "next/link";
 import type { ProductPost } from "../_lib/product-posts";
 import { formatDate, formatPrice } from "../_lib/formatters";
 import { numericPrice } from "../_lib/pricing";
-import { firstProductOrderLink } from "../_lib/product-links";
+import { productRetailerLinks } from "../_lib/product-links";
 import ProductPostSlotCount from "./product-post-slot-count";
 
 export default function ProductPostCard({
   post,
+  serialNumber,
+  status = post.status,
+  onStatusDetected,
 }: {
   post: ProductPost;
+  serialNumber: number;
+  status?: "live" | "over";
+  onStatusDetected?: (status: "live" | "over") => void;
 }) {
   const orderPrice = numericPrice(post.order_price);
   const lessPrice = numericPrice(post.less_price);
-  const isLive = post.status === "live";
+  const isLive = status === "live";
   const detailUrl = `/products/${post.id}`;
-  const productLink = firstProductOrderLink(post.description);
-  const platformName = productLink?.platform || post.platform?.trim() || "Platform not specified";
+  const productLink = productRetailerLinks(post.description)[0] ?? null;
   const hasRatingKeyword = /rating|regular rating|rating deal/i.test(post.description);
 
   return (
     <article className="group flex min-h-[132px] flex-row overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lg hover:shadow-slate-900/10 md:min-h-0 md:flex-col">
       <div className="relative flex w-[38%] shrink-0 items-center justify-center overflow-hidden bg-gradient-to-br from-slate-100 via-[#f8f7fb] to-[#eef5f5] p-1.5 sm:p-2 md:aspect-[4/3] md:w-auto md:p-3">
         <Link
-          aria-label={`View product ${post.serial_number ?? ""}`.trim()}
+          aria-label={`View product ${serialNumber}`}
           className="group/image flex h-full w-full items-center justify-center rounded-2xl focus:outline-none focus:ring-4 focus:ring-slate-950/20"
           href={detailUrl}
         >
@@ -44,28 +49,23 @@ export default function ProductPostCard({
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col p-2 sm:p-3 md:p-4">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="shrink-0 rounded-full bg-[#f3f1e8] px-2.5 py-1.5 text-xs font-black text-slate-950 md:px-3 md:py-2 md:text-sm">
-            #{post.serial_number ?? "—"}
+            #{serialNumber}
           </span>
-          <span className="max-w-28 truncate rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-800 md:text-xs">{platformName}</span>
-          {productLink && (
+          {productLink?.platform && (
             <a
-              aria-label={`Open ${platformName} product link`}
-              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-100 text-sm transition hover:bg-orange-200 focus:outline-none focus:ring-4 focus:ring-orange-500/25"
+              aria-label={`Open ${productLink.platform} product link`}
+              className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-800 transition hover:bg-blue-100 focus:outline-none focus:ring-4 focus:ring-blue-500/20 md:text-xs"
               href={productLink.url}
               rel="noopener noreferrer"
               target="_blank"
-              title={`Open ${platformName} product link`}
+              title={`Open ${productLink.platform} product link`}
             >
-              🔥
+              {productLink.platform} <span aria-hidden="true">🔥</span>
             </a>
           )}
         </div>
-
-        <h3 className="mt-2 line-clamp-2 text-sm font-bold leading-5 text-slate-900 md:text-base">
-          {post.product_name || "Product deal"}
-        </h3>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {orderPrice !== null && (
@@ -86,7 +86,12 @@ export default function ProductPostCard({
         </div>
 
         <div className="mt-2 min-h-5">
-          <ProductPostSlotCount className="mt-0 md:mt-0" formUrl={post.order_form_url} />
+          <ProductPostSlotCount
+            className="mt-0 md:mt-0"
+            currentStatus={status}
+            formUrl={post.order_form_url}
+            onStatusDetected={onStatusDetected}
+          />
         </div>
 
         <div className="mt-auto flex flex-col gap-1.5 pt-2 md:pt-3">

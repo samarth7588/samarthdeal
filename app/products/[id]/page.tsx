@@ -1,14 +1,30 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import DescriptionWithLinks from "../../_components/description-with-links";
 import { extractDealInformation, getDealActions } from "../../_lib/deal-detail";
 import { formatDate, formatPrice } from "../../_lib/formatters";
 import { getPublishedProductPost } from "../../_lib/product-posts";
-import { firstProductOrderLink } from "../../_lib/product-links";
+import { identifyProductOrderUrl, productRetailerLinks } from "../../_lib/product-links";
+import { getJayShakthiOrderFormUrl } from "../../_lib/order-form-slots";
 import { numericPrice } from "../../_lib/pricing";
 import { whatsappGroupLink } from "../../_lib/whatsapp-group-link";
 
 export const dynamic = "force-dynamic";
+
+function sameUrl(first: string, second: string) {
+  try {
+    const firstUrl = new URL(first);
+    const secondUrl = new URL(second);
+    firstUrl.hash = "";
+    secondUrl.hash = "";
+    firstUrl.searchParams.sort();
+    secondUrl.searchParams.sort();
+    return firstUrl.toString() === secondUrl.toString();
+  } catch {
+    return false;
+  }
+}
 
 function QuickActions({
   description,
@@ -18,6 +34,8 @@ function QuickActions({
   orderPrice,
   lessPrice,
   mediator,
+  productUrl,
+  orderFormUrl,
 }: {
   description: string;
   productName: string | null;
@@ -26,6 +44,8 @@ function QuickActions({
   orderPrice: number | string | null;
   lessPrice: number | string | null;
   mediator: string | null;
+  productUrl: string | null;
+  orderFormUrl: string | null;
 }) {
   const actions = getDealActions(description, {
     productName,
@@ -34,7 +54,15 @@ function QuickActions({
     orderPrice,
     lessPrice,
     mediator,
-  }).filter((action) => action.type !== "whatsapp");
+  }).filter((action) => {
+    if (action.type === "product" && productUrl) {
+      if (sameUrl(action.url, productUrl)) return true;
+      const actionLink = identifyProductOrderUrl(action.url);
+      const selectedLink = identifyProductOrderUrl(productUrl);
+      return Boolean(actionLink && selectedLink && actionLink.identity === selectedLink.identity);
+    }
+    return action.type === "order" && orderFormUrl !== null && sameUrl(action.url, orderFormUrl);
+  });
 
   if (actions.length === 0) return null;
 
@@ -74,10 +102,10 @@ export default async function ProductPostPage({ params }: { params: Promise<{ id
   const lessPrice = numericPrice(post.less_price);
   const isLive = post.status === "live";
   const dealInformation = extractDealInformation(post.description);
-  const productLink = firstProductOrderLink(post.description);
-  const platformName = productLink?.platform || post.platform?.trim() || "Platform not specified";
+  const productLink = productRetailerLinks(post.description)[0] ?? null;
+  const orderFormUrl = getJayShakthiOrderFormUrl(post.description);
   const structuredInformation = [
-    ["Platform", platformName],
+    ...(productLink?.platform ? [["Platform", productLink.platform] as [string, string]] : []),
     ["Brand", post.brand ?? dealInformation.brand],
     ["Mediator", dealInformation.mediator],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
@@ -103,16 +131,16 @@ export default async function ProductPostPage({ params }: { params: Promise<{ id
             <div className="absolute left-5 top-5 flex flex-wrap gap-2">
               <span className="rounded-full bg-white/95 px-3 py-1.5 text-[10px] font-black text-slate-800">#{post.serial_number ?? "—"}</span>
               <span className={`rounded-full px-3 py-1.5 text-[10px] font-black tracking-[0.13em] ${isLive ? "bg-emerald-500 text-white" : "bg-slate-800 text-white"}`}>{isLive ? "LIVE" : "OVER"}</span>
-              <span className="rounded-full bg-white/95 px-3 py-1.5 text-[10px] font-black text-slate-800">{platformName}</span>
-              {productLink && (
+              {productLink?.platform && (
                 <a
-                  aria-label={`Open ${platformName} product link`}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-orange-100 text-sm"
+                  aria-label={`Open ${productLink.platform} product link`}
+                  className="inline-flex items-center gap-1 rounded-full bg-white/95 px-3 py-1.5 text-[10px] font-black text-slate-800"
                   href={productLink.url}
                   rel="noopener noreferrer"
                   target="_blank"
+                  title={`Open ${productLink.platform} product link`}
                 >
-                  🔥
+                  {productLink.platform} <span aria-hidden="true">🔥</span>
                 </a>
               )}
             </div>
@@ -133,9 +161,11 @@ export default async function ProductPostPage({ params }: { params: Promise<{ id
               description={post.description}
               lessPrice={post.less_price}
               orderPrice={post.order_price}
-              platform={post.platform}
+              platform={productLink?.platform ?? null}
               productName={null}
               mediator={dealInformation.mediator}
+              productUrl={productLink?.url ?? null}
+              orderFormUrl={orderFormUrl}
             />
             {structuredInformation.length > 0 && <section className="mt-6 border-t border-slate-100 pt-5 sm:mt-8 sm:pt-6">
               <h2 className="text-sm font-black uppercase tracking-[0.14em] text-slate-500">Deal information</h2>
@@ -158,7 +188,7 @@ export default async function ProductPostPage({ params }: { params: Promise<{ id
                 WhatsApp Reference [MANDATORY]
               </a>
               <div className="mt-3 min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-[#fbfbfd] p-2 sm:p-6">
-                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700 sm:text-base sm:leading-7">{caption}</p>
+                <DescriptionWithLinks description={caption} />
               </div>
             </section>
             <p className="mt-8 text-sm text-slate-500">Posted {formatDate(post.created_at)}</p>

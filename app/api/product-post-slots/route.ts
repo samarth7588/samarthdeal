@@ -1,6 +1,6 @@
 import {
-  getJayShakthiOrderFormSlots,
-  getJayShakthiOrderFormUrl,
+  getJayShakthiOrderFormSlotsForUrl,
+  isJayShakthiOrderFormUrl,
 } from "../../_lib/order-form-slots";
 
 export async function GET(request: Request) {
@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   if (
     !requestedUrl ||
     requestedUrl.length > 2048 ||
-    !getJayShakthiOrderFormUrl(requestedUrl)
+    !isJayShakthiOrderFormUrl(requestedUrl)
   ) {
     return Response.json(
       { error: "A supported order-form URL is required." },
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const slots = await getJayShakthiOrderFormSlots(requestedUrl);
+  const slots = await getJayShakthiOrderFormSlotsForUrl(requestedUrl);
 
   return Response.json(
     { slots },

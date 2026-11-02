@@ -15,7 +15,7 @@ test("parses the example without using the deal label as the product name", () =
 
   assert.equal(metadata.productName, "");
   assert.equal(metadata.brand, "");
-  assert.equal(metadata.platform, "Amazon");
+  assert.equal(metadata.platform, "");
   assert.equal(metadata.orderPrice, "");
   assert.equal(metadata.lessPrice, "119");
 });
@@ -23,10 +23,8 @@ test("parses the example without using the deal label as the product name", () =
 test("recognizes platform names from common retailer URLs", () => {
   assert.equal(platformFromUrl("https://www.blinkit.com/prn/product"), "Blinkit");
   assert.equal(platformFromUrl("https://www.zeptonow.com/pn/product"), "Zepto");
-  assert.equal(
-    parseProductPostMessage("https://blinkit.com/prn/product").platform,
-    "Blinkit",
-  );
+  assert.equal(platformFromUrl("https://www.amazon.in/dp/example"), "");
+  assert.equal(parseProductPostMessage("https://blinkit.com/prn/product").platform, "");
 });
 
 test("prefers the retailer from the product link over a conflicting platform label", async () => {
@@ -333,7 +331,7 @@ test("infers product name and platform from ordinary deal-message lines", () => 
   const metadata = parseProductPostMessage(message);
 
   assert.equal(metadata.productName, "Winter Jacket");
-  assert.equal(metadata.platform, "Amazon");
+  assert.equal(metadata.platform, "");
   assert.equal(inferProductNameFromMessage(message), "Winter Jacket");
 });
 
@@ -378,14 +376,14 @@ test("resolves FirstCry and Amazon examples without exposing instructions or cod
     const firstCry = await resolveProductPostMetadata(exampleMessage);
     assert.equal(firstCry.productName, "BAYBEE Bedside Crib");
     assert.equal(firstCry.brand, "Dom");
-    assert.equal(firstCry.platform, "FirstCry");
+    assert.equal(firstCry.platform, null);
     assert.equal(firstCry.orderPrice, 11999);
     assert.equal(firstCry.lessPrice, 3699);
 
     const amazon = await resolveProductPostMetadata(
       "🔗 *Order Link:*\nhttps://www.amazon.in/s?k=Winter+Jacket+for+man&rh=p_78%3AB0CGHYDJFD%2Cssx%3Arelevance\nReview",
     );
-    assert.equal(amazon.productName, "Winter Jacket for Man");
+    assert.equal(amazon.productName, "");
   } finally {
     global.fetch = originalFetch;
   }

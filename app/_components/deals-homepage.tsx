@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import type { ProductPost } from "../_lib/product-posts";
 import { createSupabaseBrowserClient } from "../_lib/supabase-browser";
+import { assignProductSerialNumbers } from "../_lib/product-post-serial-numbers";
 import ProductPostCard from "./product-post-card";
 import Header from "./header";
 
@@ -18,9 +19,18 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
   const [query, setQuery] = useState("");
   const [isHowItWorksOpen, setIsHowItWorksOpen] = useState(false);
   const [isRefundTimeOpen, setIsRefundTimeOpen] = useState(false);
+  const [detectedStatuses, setDetectedStatuses] = useState<
+    Record<string, { status: "live" | "over"; formUrl: string }>
+  >({});
   const closeDialogRef = useRef<HTMLButtonElement>(null);
   const normalizedQuery = query.trim().toLowerCase();
-  const visiblePosts = posts.filter((post) => {
+  const serialNumbers = assignProductSerialNumbers(posts);
+  const visiblePosts = posts.map((post) => ({
+    ...post,
+    status: detectedStatuses[post.id]?.formUrl === post.order_form_url
+      ? detectedStatuses[post.id].status
+      : post.status,
+  })).filter((post) => {
     const searchableContent = [
       post.platform,
       post.product_name,
@@ -35,6 +45,18 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
   });
   const livePosts = visiblePosts.filter((post) => post.status === "live");
   const overPosts = visiblePosts.filter((post) => post.status === "over");
+
+  const onStatusDetected = (
+    postId: string,
+    status: "live" | "over",
+    formUrl: string,
+  ) => {
+    setDetectedStatuses((current) =>
+      current[postId]?.status === status && current[postId]?.formUrl === formUrl
+        ? current
+        : { ...current, [postId]: { status, formUrl } },
+    );
+  };
 
   useEffect(() => {
     if (!isHowItWorksOpen && !isRefundTimeOpen) return;
@@ -111,7 +133,17 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 lg:gap-4">
                   {livePosts.map((post) => (
-                    <ProductPostCard key={post.id} post={post} />
+                    <ProductPostCard
+                      key={post.id}
+                      post={post}
+                      serialNumber={serialNumbers.get(post.id)!}
+                      status={post.status}
+                      onStatusDetected={(status) => {
+                        if (post.order_form_url) {
+                          onStatusDetected(post.id, status, post.order_form_url);
+                        }
+                      }}
+                    />
                   ))}
                 </div>
               </section>
@@ -124,7 +156,17 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 lg:gap-4">
                   {overPosts.map((post) => (
-                    <ProductPostCard key={post.id} post={post} />
+                    <ProductPostCard
+                      key={post.id}
+                      post={post}
+                      serialNumber={serialNumbers.get(post.id)!}
+                      status={post.status}
+                      onStatusDetected={(status) => {
+                        if (post.order_form_url) {
+                          onStatusDetected(post.id, status, post.order_form_url);
+                        }
+                      }}
+                    />
                   ))}
                 </div>
               </section>

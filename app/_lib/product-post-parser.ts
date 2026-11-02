@@ -501,11 +501,9 @@ export function platformFromUrl(value: string) {
       .replace(/^www\./, "");
 
     const platforms: Array<[string, string]> = [
-      ["amazon.in", "Amazon"],
-      ["amzn.in", "Amazon"],
       ["fkrt.it", "Flipkart"],
-      ["amazon.com", "Amazon"],
       ["flipkart.com", "Flipkart"],
+      ["myntr.it", "Myntra"],
       ["myntra.com", "Myntra"],
       ["meesho.com", "Meesho"],
       ["ajio.com", "AJIO"],
@@ -522,7 +520,6 @@ export function platformFromUrl(value: string) {
       ["bigbasket.com", "BigBasket"],
       ["zeptonow.com", "Zepto"],
       ["swiggy.com", "Swiggy Instamart"],
-      ["deal.jayshakthimarketing.com", "Jayshakthi Deal"],
     ];
 
     return (
@@ -866,14 +863,8 @@ export function parseProductPostMessage(
   metadata.orderPrice = detectedPrices.orderPrice;
   metadata.lessPrice = detectedPrices.lessPrice;
 
-  if (!metadata.platform) {
-    const productUrl = extractProductUrls(message).find(
-      (url) => platformFromUrl(url),
-    );
-
-    metadata.platform = productUrl
-      ? platformFromUrl(productUrl)
-      : "";
+  if (/^amazon(?:\b|\.)/i.test(metadata.platform.trim())) {
+    metadata.platform = "";
   }
 
   if (!metadata.productName) {

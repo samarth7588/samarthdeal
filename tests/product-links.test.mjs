@@ -3,26 +3,21 @@ import test from "node:test";
 
 import {
   identifyProductOrderUrl,
+  productRetailerLinks,
   productOrderLinksInDescription,
 } from "../app/_lib/product-links.ts";
 
-test("normalizes tracking parameters and identifies the same Amazon product", () => {
+test("does not identify Amazon links as product platforms", () => {
   const first = identifyProductOrderUrl(
     "https://www.amazon.in/dp/B0F53TTJF5?utm_source=whatsapp&th=1",
   );
-  const second = identifyProductOrderUrl(
-    "https://amazon.in/dp/B0F53TTJF5/?psc=1&ref_=share",
-  );
 
-  assert.ok(first);
-  assert.ok(second);
-  assert.equal(first.identity, second.identity);
-  assert.equal(first.platform, "Amazon");
+  assert.equal(first, null);
 });
 
 test("does not match different product identifiers on similar product URLs", () => {
-  const first = identifyProductOrderUrl("https://www.amazon.in/dp/B0F53TTJF5");
-  const second = identifyProductOrderUrl("https://www.amazon.in/dp/B0F53TTJF6");
+  const first = identifyProductOrderUrl("https://www.flipkart.com/product-name/p/itm12345");
+  const second = identifyProductOrderUrl("https://www.flipkart.com/product-name/p/itm12346");
 
   assert.ok(first);
   assert.ok(second);
@@ -76,6 +71,158 @@ test("recognizes Flipkart and Blinkit product links for platform badges", () => 
   assert.equal(blinkit.platform, "Blinkit");
 });
 
+test("selects only the explicitly labeled product link from multiple retailer URLs", () => {
+  const links = productRetailerLinks(
+    "Amazon https://www.amazon.in/dp/B0F53TTJF5\n" +
+      "Product Link: https://dl.flipkart.com/dl/product-name?affid=example\n" +
+      "Meesho https://www.meesho.com/product-name/p/12345\n" +
+      "Blinkit https://blinkit.com/prn/product-name",
+  );
+
+  assert.deepEqual(links.map(({ platform }) => platform), ["Flipkart"]);
+  assert.equal(links[0].url, "https://dl.flipkart.com/dl/product-name");
+});
+
+test("does not show an Amazon label or fire link when the caption only has Amazon", () => {
+  assert.deepEqual(
+    productRetailerLinks("https://www.amazon.in/dp/B0F53TTJF5"),
+    [],
+  );
+});
+
+test("does not infer a platform from caption text or choose among multiple product links", () => {
+  assert.deepEqual(
+    productRetailerLinks(
+      "Platform: Flipkart\n" +
+        "https://www.flipkart.com/first-product/p/itm12345\n" +
+        "https://www.nykaa.com/second-product/p/12345",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    productRetailerLinks(
+      "Amazon deal\nhttps://www.amazon.in/dp/B0F53TTJF5\n" +
+        "https://www.flipkart.com/unlabeled-promotion/p/itm12345",
+    ),
+    [],
+  );
+});
+
+test("uses a product link explicitly associated with the caption and ignores other products", () => {
+  const links = productRetailerLinks(
+    "Product Link: https://www.nykaa.com/current-product/p/12345\n" +
+      "Also see: https://www.flipkart.com/another-product/p/itm12345",
+  );
+
+  assert.deepEqual(links.map(({ platform }) => platform), ["Nykaa"]);
+});
+
+test("prefers an explicitly labeled product URL over a generic order link", () => {
+  const links = productRetailerLinks(
+    "Product Link: https://www.nykaa.com/current-product/p/12345\n" +
+      "Order Link: https://www.flipkart.com/another-product/p/itm12345",
+  );
+
+  assert.deepEqual(links.map(({ platform }) => platform), ["Nykaa"]);
+});
+
+test("finds the product label when the same URL appears earlier without a label", () => {
+  const links = productRetailerLinks(
+    "Promo: https://www.flipkart.com/current-product/p/itm12345\n" +
+      "Product Link: https://www.flipkart.com/current-product/p/itm12345",
+  );
+
+  assert.deepEqual(links.map(({ platform }) => platform), ["Flipkart"]);
+});
+
+test("ignores Amazon named in the caption and selects the explicitly labeled non-Amazon link", () => {
+  const links = productRetailerLinks(
+    "Platform: Amazon\n" +
+      "Product Link: https://www.flipkart.com/current-product/p/itm12345",
+  );
+
+  assert.deepEqual(links.map(({ platform }) => platform), ["Flipkart"]);
+});
+
+test("excludes order form and retailer order links while retaining product links", () => {
+  const links = productRetailerLinks(
+    "Product: https://blinkit.com/prn/product-name\n" +
+      "Order form: https://deal.jayshakthimarketing.com/orderform?product_code=ITEM123\n" +
+      "Flipkart order: https://www.flipkart.com/order/item123",
+  );
+
+  assert.deepEqual(links.map(({ platform }) => platform), ["Blinkit"]);
+});
+
+test("does not show retailer category or informational pages as product platforms", () => {
+  assert.deepEqual(
+    productRetailerLinks(
+      "https://www.meesho.com/women-ethnic-wear\nhttps://www.nykaa.com/about-us",
+    ),
+    [],
+  );
+});
+
+test("recognizes Nykaa product links for the platform badge", () => {
+  const links = productRetailerLinks(
+    "https://www.nykaa.com/product-name/p/12345",
+  );
+
+  assert.equal(links.length, 1);
+  assert.equal(links[0].platform, "Nykaa");
+});
+
+test("recognizes Zepto and BigBasket product URLs independently", () => {
+  assert.equal(productRetailerLinks("https://www.zeptonow.com/pn/zepto-product-123")[0]?.platform, "Zepto");
+  assert.equal(productRetailerLinks("https://www.bigbasket.com/pd/10001234/product-name/")[0]?.platform, "BigBasket");
+});
+
+test("recognizes Tata Cliq product links", () => {
+  const links = productRetailerLinks(
+    "https://www.tatacliq.com/product-name/p-mp000000012345678",
+  );
+
+  assert.equal(links.length, 1);
+  assert.equal(links[0].platform, "Tata Cliq");
+});
+
+test("recognizes Flipkart short product links", () => {
+  const links = productRetailerLinks("https://dl.flipkart.com/s/abc123");
+
+  assert.equal(links.length, 1);
+  assert.equal(links[0].platform, "Flipkart");
+});
+
+test("shows recognized retailer platforms for nonstandard product URL paths", () => {
+  const links = productRetailerLinks(
+    "Product Link: https://www.flipkart.com/brand/item-name\n" +
+      "Promo: https://www.nykaa.com/brand/product-name\n" +
+      "More offers: https://www.myntra.com/product-name",
+  );
+
+  assert.deepEqual(links.map(({ platform }) => platform), ["Flipkart"]);
+});
+
+test("does not show retailer platform badges for common store navigation and checkout links", () => {
+  assert.deepEqual(
+    productRetailerLinks(
+      "https://www.flipkart.com/search?q=shoes\n" +
+        "https://www.nykaa.com/cart\n" +
+        "https://www.myntra.com/order/123",
+    ),
+    [],
+  );
+});
+
+test("deduplicates repeated retailer URLs in a caption", () => {
+  assert.equal(
+    productRetailerLinks(
+      "https://flipkart.com/product-name/p/itm12345\nhttps://www.flipkart.com/product-name/p/itm12345?utm_source=whatsapp",
+    ).length,
+    1,
+  );
+});
+
 test("recognizes a known product short-link without guessing its platform", () => {
   const link = identifyProductOrderUrl("https://bitli.in/QyeGq8Q");
 
@@ -86,9 +233,11 @@ test("recognizes a known product short-link without guessing its platform", () =
 
 test("extracts only actual product or order links from a caption", () => {
   const links = productOrderLinksInDescription(
-    "Group: https://chat.whatsapp.com/example\nStore: https://example.com/\nProduct: https://www.amazon.in/dp/B0F53TTJF5",
+    "Group: https://chat.whatsapp.com/example\n" +
+      "Order Form: https://deal.jayshakthimarketing.com/orderform?product_code=ITEM1\n" +
+      "Product Link: https://www.flipkart.com/product-name/p/itm12345",
   );
 
   assert.equal(links.length, 1);
-  assert.equal(links[0].platform, "Amazon");
+  assert.equal(links[0].platform, "Flipkart");
 });

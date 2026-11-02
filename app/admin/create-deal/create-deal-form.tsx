@@ -14,6 +14,7 @@ import {
 } from "../../_lib/product-post-parser";
 import type { AdminProductPost } from "../../_lib/admin-product-posts";
 import { productOrderLinksInDescription } from "../../_lib/product-links";
+import { assignProductSerialNumbers } from "../../_lib/product-post-serial-numbers";
 import { formatPrice } from "../../_lib/formatters";
 import { numericPrice } from "../../_lib/pricing";
 import ProductPostSlotCount from "../../_components/product-post-slot-count";
@@ -31,16 +32,14 @@ const emptyMetadata: ProductPostMetadata = {
   rating: "",
 };
 
-function numericText(value: string) {
-  return value.replace(/[^0-9.-]/g, "");
-}
-
 function DuplicateProductCard({
   post,
+  serialNumber,
   url,
   platform,
 }: {
   post: AdminProductPost;
+  serialNumber: number;
   url: string;
   platform: string;
 }) {
@@ -51,7 +50,7 @@ function DuplicateProductCard({
     <aside aria-live="polite" className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4">
       <p className="text-sm font-bold text-amber-900">Matching product link already exists. Publishing is still available.</p>
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-slate-800">
-        {post.serial_number !== null && <span className="rounded-full bg-white px-2.5 py-1 text-xs font-black">#{post.serial_number}</span>}
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-black">#{serialNumber}</span>
         <span className="font-bold">{post.product_name || "Product"}</span>
         {price !== null && <span className="font-semibold">{formatPrice(price)}</span>}
         <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold">{platform || "Platform not specified"}</span>
@@ -111,6 +110,7 @@ export default function CreateDealForm({
   const storageBucket = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET;
   const editingPostId = post?.id;
   const submittedLinks = productOrderLinksInDescription(description);
+  const serialNumbers = assignProductSerialNumbers(posts);
   const duplicateMatch = posts
     .filter((candidate) => candidate.id !== post?.id)
     .flatMap((candidate) => {
@@ -333,32 +333,12 @@ export default function CreateDealForm({
         {safeState.fieldErrors.details && <p className="mt-2 text-xs font-medium text-rose-700">{safeState.fieldErrors.details}</p>}
       </div>
 
-      <fieldset className="grid gap-4 sm:grid-cols-2">
-        <legend className="col-span-full text-sm font-black uppercase tracking-[0.12em] text-slate-800">Product metadata</legend>
-          {([
-            ["productName", "Product name", metadata.productName, "text"],
-            ["brand", "Brand", metadata.brand, "text"],
-            ["platform", "Platform", metadata.platform, "text"],
-            ["orderPrice", "Order price", metadata.orderPrice, "number"],
-            ["lessPrice", "Less price", metadata.lessPrice, "number"],
-            ["rating", "Platform rating", metadata.rating, "number"],
-          ] as const).map(([name, label, value, type]) => (
-            <label className="text-sm font-bold text-slate-800" htmlFor={name} key={name}>
-              <span>{label}</span>
-              <input
-                className="mt-2 h-8 w-full border-0 bg-transparent px-0 text-sm font-semibold text-slate-900 outline-none focus:ring-0"
-                id={name}
-                min={type === "number" ? "0" : undefined}
-                name={name}
-                onChange={(event) => setMetadata((current) => ({ ...current, [name]: type === "number" ? numericText(event.target.value) : event.target.value }))}
-                step={type === "number" ? "0.01" : undefined}
-                type={type}
-                value={value}
-              />
-              {safeState.fieldErrors[name] && <span className="mt-1 block text-xs font-medium text-rose-700">{safeState.fieldErrors[name]}</span>}
-            </label>
-          ))}
-      </fieldset>
+      <input name="productName" type="hidden" value={metadata.productName} />
+      <input name="brand" type="hidden" value={metadata.brand} />
+      <input name="platform" type="hidden" value={metadata.platform} />
+      <input name="orderPrice" type="hidden" value={metadata.orderPrice} />
+      <input name="lessPrice" type="hidden" value={metadata.lessPrice} />
+      <input name="rating" type="hidden" value={metadata.rating} />
 
       <input name="status" type="hidden" value={selectedStatus} />
 
@@ -366,8 +346,9 @@ export default function CreateDealForm({
     </form>
     {duplicateMatch && (
       <DuplicateProductCard
-        platform={metadata.platform || duplicateMatch.link.platform || "Platform not specified"}
+        platform={duplicateMatch.link.platform || "Platform not specified"}
         post={duplicateMatch.post}
+        serialNumber={serialNumbers.get(duplicateMatch.post.id)!}
         url={duplicateMatch.link.url}
       />
     )}

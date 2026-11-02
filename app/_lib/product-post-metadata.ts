@@ -1,13 +1,13 @@
 import {
   cleanProductTitle,
   deriveProductNameFromUrl,
-  extractProductUrls,
   inferProductNameFromMessage,
   isValidProductName,
   nullablePrice,
   parseProductPostMessage,
   platformFromUrl,
 } from "./product-post-parser.ts";
+import { firstProductOrderLink } from "./product-links.ts";
 
 const requestTimeoutMs = 1500;
 
@@ -380,18 +380,7 @@ export async function resolveProductPostMetadata(
   const parsed =
     parseProductPostMessage(message);
 
-  const productUrls =
-    extractProductUrls(message);
-
-  /*
-   * Prefer a known shopping-platform URL, otherwise use
-   * the first extracted URL (including shorteners such
-   * as bitli.in).
-   */
-  const productUrl =
-    productUrls.find((url) =>
-      platformFromUrl(url),
-    ) ?? productUrls[0];
+  const productUrl = firstProductOrderLink(message)?.url ?? null;
 
   /*
    * 1. Explicit Product Name from the message.
@@ -472,9 +461,7 @@ export async function resolveProductPostMetadata(
     platform:
       (productUrl
         ? platformFromUrl(productUrl)
-        : "") ||
-      parsed.platform ||
-      null,
+        : "") || null,
 
     orderPrice:
       nullablePrice(

@@ -1,5 +1,6 @@
 import { createPublicSupabaseClient } from "./supabase.ts";
 import {
+  getOrderFormPostStatus,
   getJayShakthiOrderFormSlots,
   getJayShakthiOrderFormUrl,
   type OrderFormSlotAvailability,
@@ -228,6 +229,12 @@ async function normalizePost(
       ? row.less_price
       : null;
 
+  const orderFormUrl = getJayShakthiOrderFormUrl(description);
+  const orderFormSlots = options.includeOrderFormSlots
+    ? await getJayShakthiOrderFormSlots(description)
+    : null;
+  const detectedStatus = getOrderFormPostStatus(orderFormSlots);
+
   return {
     id: String(row.id),
 
@@ -243,10 +250,7 @@ async function normalizePost(
       validBrand || null,
 
     platform:
-      productLink?.platform ||
-      (typeof row.platform === "string" ? row.platform : "") ||
-      parsed.platform ||
-      null,
+      productLink?.platform || null,
 
     order_price:
       nullablePrice(parsed.orderPrice) ??
@@ -266,19 +270,16 @@ async function normalizePost(
         : null,
 
     status:
-      row.status === "over"
-        ? "over"
-        : "live",
+      detectedStatus ??
+      (row.status === "over" ? "over" : "live"),
 
     created_at: String(row.created_at),
 
     updated_at: String(row.updated_at),
 
-    order_form_url: getJayShakthiOrderFormUrl(description),
+    order_form_url: orderFormUrl,
 
-    order_form_slots: options.includeOrderFormSlots
-      ? await getJayShakthiOrderFormSlots(description)
-      : null,
+    order_form_slots: orderFormSlots,
   };
 }
 

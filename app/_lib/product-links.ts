@@ -28,6 +28,26 @@ const nonProductHosts = [
   "telegram.org",
   "forms.gle",
 ];
+const rejectedProductPathSegments = new Set([
+  "form",
+  "forms",
+  "orderform",
+  "order",
+  "orders",
+  "checkout",
+  "cart",
+  "basket",
+  "account",
+  "login",
+  "register",
+  "search",
+  "category",
+  "categories",
+  "about",
+  "about-us",
+  "help",
+  "help-center",
+]);
 
 export type ProductOrderLink = {
   url: string;
@@ -87,9 +107,28 @@ function queryProductIdentity(url: URL) {
 
 function pathProductIdentity(url: URL) {
   const segments = decodedPathSegments(url).map((segment) => segment.toLowerCase());
+  const tataCliqProductId = url.hostname === "tatacliq.com"
+    ? segments.find((segment) => segment.startsWith("p-mp"))
+    : undefined;
+  if (tataCliqProductId) {
+    return `path:${tataCliqProductId}`;
+  }
   if (url.hostname === "blinkit.com" && segments[0] === "prn" && segments[1]) {
     const productIdIndex = segments.indexOf("p", 2);
     return `path:${segments[productIdIndex + 1] || segments[1]}`;
+  }
+  if (url.hostname === "dl.flipkart.com" && segments[0] === "dl" && segments[1]) {
+    return `path:${segments[1]}`;
+  }
+  if (
+    url.hostname === "dl.flipkart.com" &&
+    segments[0] === "s" &&
+    segments[1]
+  ) {
+    return `short-link:${segments[1]}`;
+  }
+  if (url.hostname === "myntr.it" && segments.length === 1 && segments[0]) {
+    return `short-link:${segments[0]}`;
   }
 
   const productSegmentNames = new Set([
@@ -98,6 +137,8 @@ function pathProductIdentity(url: URL) {
     "item",
     "items",
     "p",
+    "pd",
+    "pn",
     "dp",
     "orderform",
     "order",
@@ -134,6 +175,7 @@ export function identifyProductOrderUrl(value: string): ProductOrderLink | null 
   if (!url) return null;
 
   const hostname = url.hostname;
+  if (isAmazonUrl(url.toString())) return null;
   if (nonProductHosts.some((domain) => isDomainOrSubdomain(hostname, domain))) {
     return null;
   }
@@ -147,8 +189,11 @@ export function identifyProductOrderUrl(value: string): ProductOrderLink | null 
   const hasOrderRoute = /\/(?:orderform|order|checkout)(?:\/|$)/i.test(pathname);
   const pathIdentity = pathProductIdentity(url);
   const hasStructuredProductPath =
-    /\/(?:dp|gp\/product|products?|items?|p|product-detail|product-details)(?:\/|$)/i.test(pathname) ||
+    /\/(?:dp|gp\/product|products?|items?|p|pd|pn|product-detail|product-details)(?:\/|$)/i.test(pathname) ||
     /\/buy\/?$/i.test(pathname) ||
+    (hostname === "tatacliq.com" && /(?:^|\/)p-mp[^/]+(?:\/|$)/i.test(pathname)) ||
+    (hostname === "dl.flipkart.com" && /^\/dl\/[^/]+(?:\/|$)/i.test(pathname)) ||
+    (hostname === "dl.flipkart.com" && /^\/s\/[^/]+(?:\/|$)/i.test(pathname)) ||
     (hostname === "blinkit.com" && /^\/prn\/[^/]+(?:\/|$)/i.test(pathname));
   const isKnownShortProductLink =
     (hostname === "amzn.in" && /^\/d\/[^/]+$/i.test(pathname)) ||
@@ -168,15 +213,109 @@ export function identifyProductOrderUrl(value: string): ProductOrderLink | null 
 }
 
 export function productOrderLinksInDescription(description: string) {
-  const seen = new Set<string>();
-  return extractProductUrls(description).flatMap((url) => {
-    const link = identifyProductOrderUrl(url);
-    if (!link || seen.has(link.identity)) return [];
-    seen.add(link.identity);
-    return [link];
-  });
+  const productLink = productRetailerLink(description);
+  return productLink ? [productLink] : [];
 }
 
 export function firstProductOrderLink(description: string) {
-  return productOrderLinksInDescription(description)[0] ?? null;
+  return productRetailerLink(description);
+}
+
+function explicitProductLinkPriority(description: string, url: string) {
+  let index = description.indexOf(url);
+  while (index >= 0) {
+    const prefix = description.slice(Math.max(0, index - 180), index);
+    const recentLines = prefix.split(/\r?\n/).slice(-2).join(" ");
+    const labelContext = recentLines
+      .replace(/\[\s*[^\]]+\s*\]\(\s*$/i, "")
+      .replace(/[*_`]/g, " ");
+
+    const label = labelContext.trim();
+    if (/\b(?:product(?:\s+(?:link|url))?|buy\s+link|shop(?:ping)?\s+link|store\s+link)\s*[:：-]?\s*$/i.test(label)) return 2;
+    if (/\border\s+link\s*[:：-]?\s*$/i.test(label)) return 1;
+    index = description.indexOf(url, index + url.length);
+  }
+  return 0;
+}
+
+function isAmazonUrl(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase().replace(/^www\./, "");
+    return (
+      hostname === "amzn.in" ||
+      hostname === "amzn.to" ||
+      /(?:^|\.)amazon\.[a-z]{2,3}(?:\.[a-z]{2})?$/.test(hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isProductPath(url: URL) {
+  const segments = decodedPathSegments(url).map((segment) => segment.toLowerCase());
+  if (segments.some((segment) => rejectedProductPathSegments.has(segment))) {
+    return false;
+  }
+  return Boolean(pathProductIdentity(url));
+}
+
+export function productRetailerLink(description: string): ProductOrderLink | null {
+  const candidates = extractProductUrls(description).flatMap((value) => {
+    const url = normalizeProductUrl(value);
+    if (!url || url.pathname === "/") return [];
+    const pathSegments = decodedPathSegments(url).map((segment) => segment.toLowerCase());
+    if (pathSegments.some((segment) => rejectedProductPathSegments.has(segment))) {
+      return [];
+    }
+    const explicitPriority = explicitProductLinkPriority(description, value);
+    const explicit = explicitPriority > 0;
+    const isAmazon = isAmazonUrl(url.toString());
+    const platform = isAmazon ? "Amazon" : platformFromUrl(url.toString());
+    if (!explicit && (!platform || !isProductPath(url))) return [];
+
+    const identified = isAmazon ? null : identifyProductOrderUrl(url.toString());
+    if (!identified && !explicit && !isAmazon) return [];
+    if (!isProductPath(url) && !explicit) return [];
+
+    const identity =
+      identified?.identity ??
+      `${url.hostname}:${pathProductIdentity(url) ?? `${url.pathname}${url.search}`}`;
+    return [{
+      url: url.toString(),
+      platform,
+      identity,
+      explicitPriority,
+    }];
+  });
+
+  const uniqueByIdentity = new Map<string, (typeof candidates)[number]>();
+  for (const candidate of candidates) {
+    const existing = uniqueByIdentity.get(candidate.identity);
+    if (!existing || candidate.explicitPriority > existing.explicitPriority) {
+      uniqueByIdentity.set(candidate.identity, candidate);
+    }
+  }
+  const uniqueCandidates = [...uniqueByIdentity.values()];
+  const maximumExplicitPriority = Math.max(
+    0,
+    ...uniqueCandidates.map((candidate) => candidate.explicitPriority),
+  );
+  const explicitlyLinked = uniqueCandidates.filter(
+    (candidate) => candidate.explicitPriority === maximumExplicitPriority && maximumExplicitPriority > 0,
+  );
+  const selected =
+    explicitlyLinked.length === 1
+      ? explicitlyLinked[0]
+      : explicitlyLinked.length === 0 && uniqueCandidates.length === 1
+        ? uniqueCandidates[0]
+        : null;
+
+  return !selected || isAmazonUrl(selected.url)
+    ? null
+    : { url: selected.url, platform: selected.platform, identity: selected.identity };
+}
+
+export function productRetailerLinks(description: string): ProductOrderLink[] {
+  const productLink = productRetailerLink(description);
+  return productLink ? [productLink] : [];
 }
