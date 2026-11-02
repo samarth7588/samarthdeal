@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from "./supabase-server.ts";
 import { classifySupabaseError, logSupabaseError } from "./supabase-error.ts";
 import { cleanProductTitle, deriveProductNameFromUrl, inferProductNameFromMessage, isValidProductName, parseProductPostMessage } from "./product-post-parser.ts";
-import { firstProductOrderLink } from "./product-links.ts";
+import { firstProductOrderLink, productPlatformLink } from "./product-links.ts";
 
 export type AdminProductPost = {
   id: string;
@@ -34,6 +34,8 @@ async function normalizePost(row: Record<string, unknown>): Promise<AdminProduct
   const description = String(row.description);
   const parsed = parseProductPostMessage(description);
   const productLink = firstProductOrderLink(description);
+  const platformValue = typeof row.platform === "string" ? row.platform.trim() : "";
+  const displayProductLink = productPlatformLink(description, platformValue);
   const productUrl = productLink?.url;
   const storedNameCandidate = typeof row.product_name === "string" ? cleanProductTitle(row.product_name) : "";
   const storedName = isValidProductName(storedNameCandidate) ? storedNameCandidate : "";
@@ -57,7 +59,7 @@ async function normalizePost(row: Record<string, unknown>): Promise<AdminProduct
     description,
     product_name: localName || null,
     brand,
-    platform: productLink?.platform || null,
+    platform: platformValue || displayProductLink?.platform || productLink?.platform || null,
     order_price: typeof row.order_price === "number" || typeof row.order_price === "string" ? row.order_price : null,
     less_price: typeof row.less_price === "number" || typeof row.less_price === "string" ? row.less_price : null,
     rating: validRating(row.rating),

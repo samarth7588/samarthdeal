@@ -1,12 +1,13 @@
+import { memo, useCallback } from "react";
 import Link from "next/link";
 
 import type { ProductPost } from "../_lib/product-posts";
 import { formatDate, formatPrice } from "../_lib/formatters";
 import { numericPrice } from "../_lib/pricing";
-import { productRetailerLinks } from "../_lib/product-links";
+import { productPlatformLink } from "../_lib/product-links";
 import ProductPostSlotCount from "./product-post-slot-count";
 
-export default function ProductPostCard({
+function ProductPostCard({
   post,
   serialNumber,
   status = post.status,
@@ -15,14 +16,19 @@ export default function ProductPostCard({
   post: ProductPost;
   serialNumber: number;
   status?: "live" | "over";
-  onStatusDetected?: (status: "live" | "over") => void;
+  onStatusDetected?: (postId: string, status: "live" | "over", formUrl: string) => void;
 }) {
   const orderPrice = numericPrice(post.order_price);
   const lessPrice = numericPrice(post.less_price);
   const isLive = status === "live";
   const detailUrl = `/products/${post.id}`;
-  const productLink = productRetailerLinks(post.description)[0] ?? null;
+  const productLink = productPlatformLink(post.description, post.platform);
   const hasRatingKeyword = /rating|regular rating|rating deal/i.test(post.description);
+  const handleStatusDetected = useCallback((detectedStatus: "live" | "over") => {
+    if (post.order_form_url) {
+      onStatusDetected?.(post.id, detectedStatus, post.order_form_url);
+    }
+  }, [onStatusDetected, post.id, post.order_form_url]);
 
   return (
     <article className="group flex min-h-[132px] flex-row overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-lg hover:shadow-slate-900/10 md:min-h-0 md:flex-col">
@@ -35,7 +41,11 @@ export default function ProductPostCard({
           <img
             alt="Product deal"
             className="h-full w-full object-contain transition duration-500 group-hover/image:scale-105"
+            decoding="async"
+            height={1600}
+            loading="lazy"
             src={post.image_url}
+            width={1600}
           />
         </Link>
 
@@ -54,16 +64,22 @@ export default function ProductPostCard({
             #{serialNumber}
           </span>
           {productLink?.platform && (
-            <a
-              aria-label={`Open ${productLink.platform} product link`}
-              className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-800 transition hover:bg-blue-100 focus:outline-none focus:ring-4 focus:ring-blue-500/20 md:text-xs"
-              href={productLink.url}
-              rel="noopener noreferrer"
-              target="_blank"
-              title={`Open ${productLink.platform} product link`}
-            >
-              {productLink.platform} <span aria-hidden="true">🔥</span>
-            </a>
+            productLink.url ? (
+              <a
+                aria-label={`Open ${productLink.platform} product link`}
+                className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-800 transition hover:bg-blue-100 focus:outline-none focus:ring-4 focus:ring-blue-500/20 md:text-xs"
+                href={productLink.url}
+                rel="noopener noreferrer"
+                target="_blank"
+                title={`Open ${productLink.platform} product link`}
+              >
+                {productLink.platform} <span aria-hidden="true">🔥</span>
+              </a>
+            ) : (
+              <span className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-800 md:text-xs">
+                {productLink.platform} <span aria-hidden="true">🔥</span>
+              </span>
+            )
           )}
         </div>
 
@@ -90,7 +106,7 @@ export default function ProductPostCard({
             className="mt-0 md:mt-0"
             currentStatus={status}
             formUrl={post.order_form_url}
-            onStatusDetected={onStatusDetected}
+            onStatusDetected={handleStatusDetected}
           />
         </div>
 
@@ -109,3 +125,5 @@ export default function ProductPostCard({
     </article>
   );
 }
+
+export default memo(ProductPostCard);

@@ -1,7 +1,10 @@
+import type { AdminProductPost } from "../../_lib/admin-product-posts";
+
 export type CreateDealState = {
   errorMessage: string | null;
   successMessage: string | null;
   fieldErrors: Record<string, string>;
+  publishedPost?: AdminProductPost;
 };
 
 export const initialCreateDealState: CreateDealState = {

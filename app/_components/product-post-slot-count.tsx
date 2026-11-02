@@ -19,14 +19,36 @@ export default function ProductPostSlotCount({
     useState<OrderFormSlotAvailability | null>(null);
   const [availabilityUrl, setAvailabilityUrl] = useState<string | null>(null);
   const [unavailableUrl, setUnavailableUrl] = useState<string | null>(null);
+  const [visibleFormUrl, setVisibleFormUrl] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const onStatusDetectedRef = useRef(onStatusDetected);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !formUrl) return;
+
+    if (typeof IntersectionObserver === "undefined") {
+      const frame = window.requestAnimationFrame(() => setVisibleFormUrl(formUrl));
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setVisibleFormUrl(formUrl);
+        observer.disconnect();
+      }
+    }, { rootMargin: "300px" });
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, [formUrl]);
 
   useEffect(() => {
     onStatusDetectedRef.current = onStatusDetected;
   }, [onStatusDetected]);
 
   useEffect(() => {
-    if (!formUrl) return;
+    if (!formUrl || visibleFormUrl !== formUrl) return;
 
     const requestedFormUrl = formUrl;
     const controller = new AbortController();
@@ -87,32 +109,40 @@ export default function ProductPostSlotCount({
       window.clearInterval(refreshTimer);
       controller.abort();
     };
-  }, [currentStatus, formUrl]);
+  }, [currentStatus, formUrl, visibleFormUrl]);
 
   if (!formUrl) return null;
   const currentAvailability = availabilityUrl === formUrl ? availability : null;
   const unavailable = unavailableUrl === formUrl;
 
   return (
-    <div aria-live="polite" className={`${className} flex flex-wrap gap-1.5`}>
-      {currentAvailability
+    <div
+      aria-live="polite"
+      className={`${className} flex flex-wrap gap-1.5`}
+      ref={containerRef}
+    >
+      {visibleFormUrl !== formUrl ? (
+        <span className="w-fit rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600 md:text-xs">
+          Slots load when visible
+        </span>
+      ) : currentAvailability
         ? currentAvailability.slots.map((slot) => (
-            <span
-              className={`w-fit rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide md:text-xs ${
-                slot.availableSlots > 0
-                  ? "bg-sky-100 text-sky-800"
-                  : "bg-rose-50 text-rose-700"
-              }`}
-              key={slot.dealType}
-            >
-              {slot.dealType}: {slot.availableSlots} {slot.availableSlots === 1 ? "slot" : "slots"}
-            </span>
-          ))
+          <span
+            className={`w-fit rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide md:text-xs ${
+              slot.availableSlots > 0
+                ? "bg-sky-100 text-sky-800"
+                : "bg-rose-50 text-rose-700"
+            }`}
+            key={slot.dealType}
+          >
+            {slot.dealType}: {slot.availableSlots} {slot.availableSlots === 1 ? "slot" : "slots"}
+          </span>
+        ))
         : (
-            <span className="w-fit rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600 md:text-xs">
-              {unavailable ? "Slots unavailable" : "Checking slots…"}
-            </span>
-          )}
+          <span className="w-fit rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600 md:text-xs">
+            {unavailable ? "Slots unavailable" : "Checking slots…"}
+          </span>
+        )}
     </div>
   );
 }

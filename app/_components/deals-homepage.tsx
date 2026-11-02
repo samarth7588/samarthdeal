@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { ProductPost } from "../_lib/product-posts";
@@ -8,6 +8,9 @@ import { createSupabaseBrowserClient } from "../_lib/supabase-browser";
 import { assignProductSerialNumbers } from "../_lib/product-post-serial-numbers";
 import ProductPostCard from "./product-post-card";
 import Header from "./header";
+
+const initialProductCount = 24;
+const productCountIncrement = 24;
 
 interface DealsHomepageProps {
   posts: ProductPost[];
@@ -22,31 +25,45 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
   const [detectedStatuses, setDetectedStatuses] = useState<
     Record<string, { status: "live" | "over"; formUrl: string }>
   >({});
+  const [liveVisibleCount, setLiveVisibleCount] = useState(initialProductCount);
+  const [overVisibleCount, setOverVisibleCount] = useState(initialProductCount);
   const closeDialogRef = useRef<HTMLButtonElement>(null);
-  const normalizedQuery = query.trim().toLowerCase();
-  const serialNumbers = assignProductSerialNumbers(posts);
-  const visiblePosts = posts.map((post) => ({
-    ...post,
-    status: detectedStatuses[post.id]?.formUrl === post.order_form_url
-      ? detectedStatuses[post.id].status
-      : post.status,
-  })).filter((post) => {
-    const searchableContent = [
+  const normalizedQuery = useDeferredValue(query.trim().toLowerCase());
+  const searchablePosts = useMemo(() => posts.map((post) => ({
+    post,
+    searchableContent: [
       post.platform,
       post.product_name,
+      post.brand,
       post.description,
       post.order_price,
       post.less_price,
     ]
       .join(" ")
-      .toLowerCase();
-
-    return !normalizedQuery || searchableContent.includes(normalizedQuery);
-  });
-  const livePosts = visiblePosts.filter((post) => post.status === "live");
-  const overPosts = visiblePosts.filter((post) => post.status === "over");
-
-  const onStatusDetected = (
+      .toLowerCase(),
+  })), [posts]);
+  const serialNumbers = useMemo(() => assignProductSerialNumbers(posts), [posts]);
+  const visiblePosts = useMemo(
+    () => searchablePosts
+      .filter(({ searchableContent }) => !normalizedQuery || searchableContent.includes(normalizedQuery))
+      .map(({ post }) => post),
+    [normalizedQuery, searchablePosts],
+  );
+  const livePosts = useMemo(
+    () => visiblePosts.filter((post) =>
+      (detectedStatuses[post.id]?.formUrl === post.order_form_url
+        ? detectedStatuses[post.id].status
+        : post.status) === "live"),
+    [detectedStatuses, visiblePosts],
+  );
+  const overPosts = useMemo(
+    () => visiblePosts.filter((post) =>
+      (detectedStatuses[post.id]?.formUrl === post.order_form_url
+        ? detectedStatuses[post.id].status
+        : post.status) === "over"),
+    [detectedStatuses, visiblePosts],
+  );
+  const onStatusDetected = useCallback((
     postId: string,
     status: "live" | "over",
     formUrl: string,
@@ -56,7 +73,13 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
         ? current
         : { ...current, [postId]: { status, formUrl } },
     );
-  };
+  }, []);
+
+  function updateSearch(value: string) {
+    setQuery(value);
+    setLiveVisibleCount(initialProductCount);
+    setOverVisibleCount(initialProductCount);
+  }
 
   useEffect(() => {
     if (!isHowItWorksOpen && !isRefundTimeOpen) return;
@@ -115,7 +138,7 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
         onHowItWorks={() => setIsHowItWorksOpen(true)}
         onRefundTime={() => setIsRefundTimeOpen(true)}
         searchValue={query}
-        onSearchChange={setQuery}
+        onSearchChange={updateSearch}
       />
       <main id="live-deals" className="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
         {errorMessage ? (
@@ -132,20 +155,27 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
                   <p className="text-xs font-medium text-slate-600 sm:text-sm">{livePosts.length} {livePosts.length === 1 ? "deal" : "deals"}</p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 lg:gap-4">
-                  {livePosts.map((post) => (
+                  {livePosts.slice(0, liveVisibleCount).map((post) => (
                     <ProductPostCard
                       key={post.id}
                       post={post}
                       serialNumber={serialNumbers.get(post.id)!}
-                      status={post.status}
-                      onStatusDetected={(status) => {
-                        if (post.order_form_url) {
-                          onStatusDetected(post.id, status, post.order_form_url);
-                        }
-                      }}
+                      status={detectedStatuses[post.id]?.formUrl === post.order_form_url
+                        ? detectedStatuses[post.id].status
+                        : post.status}
+                      onStatusDetected={onStatusDetected}
                     />
                   ))}
                 </div>
+                {livePosts.length > liveVisibleCount && (
+                  <button
+                    className="mt-5 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-slate-400"
+                    onClick={() => setLiveVisibleCount((count) => count + productCountIncrement)}
+                    type="button"
+                  >
+                    Show more LIVE deals
+                  </button>
+                )}
               </section>
             )}
             {overPosts.length > 0 && (
@@ -155,20 +185,27 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
                   <p className="text-xs font-medium text-slate-600 sm:text-sm">{overPosts.length} {overPosts.length === 1 ? "deal" : "deals"}</p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 lg:gap-4">
-                  {overPosts.map((post) => (
+                  {overPosts.slice(0, overVisibleCount).map((post) => (
                     <ProductPostCard
                       key={post.id}
                       post={post}
                       serialNumber={serialNumbers.get(post.id)!}
-                      status={post.status}
-                      onStatusDetected={(status) => {
-                        if (post.order_form_url) {
-                          onStatusDetected(post.id, status, post.order_form_url);
-                        }
-                      }}
+                      status={detectedStatuses[post.id]?.formUrl === post.order_form_url
+                        ? detectedStatuses[post.id].status
+                        : post.status}
+                      onStatusDetected={onStatusDetected}
                     />
                   ))}
                 </div>
+                {overPosts.length > overVisibleCount && (
+                  <button
+                    className="mt-5 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-slate-400"
+                    onClick={() => setOverVisibleCount((count) => count + productCountIncrement)}
+                    type="button"
+                  >
+                    Show more OVER deals
+                  </button>
+                )}
               </section>
             )}
           </div>
@@ -181,7 +218,7 @@ export default function DealsHomepage({ posts, errorMessage }: DealsHomepageProp
             {normalizedQuery && (
               <button
                 className="mt-4 text-sm font-bold text-slate-950 underline decoration-slate-300 underline-offset-4 hover:decoration-slate-950"
-                onClick={() => setQuery("")}
+                onClick={() => updateSearch("")}
                 type="button"
               >
                 Clear search

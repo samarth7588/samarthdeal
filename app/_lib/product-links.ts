@@ -1,4 +1,8 @@
-import { extractProductUrls, platformFromUrl } from "./product-post-parser.ts";
+import {
+  extractProductUrls,
+  parseProductPostMessage,
+  platformFromUrl,
+} from "./product-post-parser.ts";
 
 const trackingParameter = /^(?:utm_.+|fbclid|gclid|dclid|msclkid|yclid|gbraid|wbraid|irclickid|igshid|mc_cid|mc_eid|spm|ref|ref_.+|tag|aff|affid|aff_id|affcode|campaign|source)$/i;
 const productParameterNames = [
@@ -318,4 +322,34 @@ export function productRetailerLink(description: string): ProductOrderLink | nul
 export function productRetailerLinks(description: string): ProductOrderLink[] {
   const productLink = productRetailerLink(description);
   return productLink ? [productLink] : [];
+}
+
+export function productPlatformLink(
+  description: string,
+  storedPlatform?: string | null,
+): ProductOrderLink | null {
+  const captionPlatform = parseProductPostMessage(description).platform.trim();
+  const retailerLink = productRetailerLink(description);
+  if (retailerLink) return retailerLink;
+
+  const candidates = extractProductUrls(description).flatMap((value) => {
+    const url = normalizeProductUrl(value);
+    if (!url) return [];
+    const platform = platformFromUrl(url.toString());
+    return platform ? [{ url: url.toString(), platform }] : [];
+  });
+  const matchingStoredPlatform = storedPlatform?.trim()
+    ? candidates.find(({ platform }) => platform.toLowerCase() === storedPlatform.trim().toLowerCase())
+    : undefined;
+  if (matchingStoredPlatform) {
+    return { ...matchingStoredPlatform, identity: matchingStoredPlatform.url };
+  }
+
+  const platforms = new Set(candidates.map(({ platform }) => platform.toLowerCase()));
+  if (platforms.size === 1 && candidates.length > 0) {
+    return { ...candidates[0], identity: candidates[0].url };
+  }
+
+  const platform = storedPlatform?.trim() || captionPlatform;
+  return platform ? { url: "", platform, identity: platform.toLowerCase() } : null;
 }
