@@ -114,9 +114,16 @@ export default function ProductPublishQueue({
   const initializedPublishedIds = useRef(false);
   const knownPublishedIds = useRef(new Set<string>());
 
-  const refreshLocalJobs = useCallback(async () => {
-    const jobs = await getLocalProductPublishJobs();
-    if (mounted.current) setLocalJobs(jobs.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+  const updateLocalJob = useCallback(async (
+    id: string,
+    update: Partial<LocalProductPublishJob>,
+  ) => {
+    await updateLocalProductPublishJob(id, update);
+    if (!mounted.current) return;
+    const updatedAt = new Date().toISOString();
+    setLocalJobs((jobs) => jobs.map((job) =>
+      job.id === id ? { ...job, ...update, updatedAt } : job,
+    ));
   }, []);
 
   const refreshServerJobs = useCallback(async () => {
@@ -165,11 +172,10 @@ export default function ProductPublishQueue({
   }, []);
 
   const processJob = useCallback(async (job: LocalProductPublishJob) => {
-    await updateLocalProductPublishJob(job.id, {
+    await updateLocalJob(job.id, {
       state: "uploading",
       errorMessage: null,
     });
-    await refreshLocalJobs();
 
     let imageUrl = job.imageUrl;
     if (!imageUrl) {
@@ -211,7 +217,7 @@ export default function ProductPublishQueue({
       }
       imageUrl = responseBody.imageUrl;
       await timeQueueOperation("persist-uploaded-image-reference", () =>
-        updateLocalProductPublishJob(job.id, {
+        updateLocalJob(job.id, {
           imageUrl,
           imageFile: new Blob(),
           imageFileName: "",
@@ -219,12 +225,15 @@ export default function ProductPublishQueue({
       );
     }
 
-    await updateLocalProductPublishJob(job.id, { state: "saving" });
-    await refreshLocalJobs();
+    await updateLocalJob(job.id, { state: "saving" });
+    const uploadedImageUrl = imageUrl;
+    if (!uploadedImageUrl) {
+      throw new Error("The queued product has no uploaded image URL.");
+    }
     const result = await timeQueueOperation("server-queue-insert", () =>
       enqueueProductPublishJob({
         id: job.id,
-        imageUrl: imageUrl!,
+        imageUrl: uploadedImageUrl,
         description: job.description,
         status: job.status,
         productName: job.productName,
@@ -237,8 +246,7 @@ export default function ProductPublishQueue({
     );
     if (result.errorMessage) throw new Error(result.errorMessage);
     wakeWorker();
-    await timeQueueOperation("refresh-server-queue", refreshServerJobs);
-  }, [refreshLocalJobs, refreshServerJobs, wakeWorker]);
+  }, [updateLocalJob, wakeWorker]);
 
   const enqueueProduct = useCallback(async (formData: FormData, imageFile: File) => {
     const description = String(formData.get("details") ?? "");
@@ -262,13 +270,12 @@ export default function ProductPublishQueue({
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-
     await addLocalProductPublishJob(job);
     setQueueError(null);
-    void refreshLocalJobs().catch((error: unknown) => {
-      console.error("Unable to refresh the locally saved publishing queue.", error);
-      setQueueError("The product is safely saved, but the queue display could not be refreshed.");
-    });
+    setQueueError(null);
+    setLocalJobs((jobs) => [...jobs, job].sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    ));
     if (navigator.storage?.persist) {
       void navigator.storage.persist().then((persisted) => {
         if (!persisted) {
@@ -283,7 +290,7 @@ export default function ProductPublishQueue({
         setStoragePersistenceWarning("Browser storage persistence could not be confirmed.");
       });
     }
-  }, [refreshLocalJobs]);
+  }, []);
 
   const retryJob = useCallback(async (job: LocalProductPublishJob) => {
     const remoteJob = serverJobs.find((serverJob) => serverJob.id === job.id);
@@ -293,16 +300,18 @@ export default function ProductPublishQueue({
         setQueueError(result.errorMessage);
         return;
       }
-      await updateLocalProductPublishJob(job.id, { state: "saving", errorMessage: null });
-      await refreshLocalJobs();
-      await refreshServerJobs();
+      await updateLocalJob(job.id, { state: "saving", errorMessage: null });
+      setServerJobs((jobs) => jobs.map((serverJob) =>
+        serverJob.id === job.id
+          ? { ...serverJob, state: "queued", attempts: 0, last_error: null }
+          : serverJob,
+      ));
       wakeWorker();
       return;
     }
 
-    await updateLocalProductPublishJob(job.id, { state: "waiting", errorMessage: null });
-    await refreshLocalJobs();
-  }, [refreshLocalJobs, refreshServerJobs, serverJobs, wakeWorker]);
+    await updateLocalJob(job.id, { state: "waiting", errorMessage: null });
+  }, [serverJobs, updateLocalJob, wakeWorker]);
 
   useEffect(() => {
     mounted.current = true;
@@ -330,7 +339,7 @@ export default function ProductPublishQueue({
     return () => {
       mounted.current = false;
     };
-  }, [refreshLocalJobs, refreshServerJobs]);
+  }, [refreshServerJobs]);
 
   useEffect(() => {
     onQueueProductRef(enqueueProduct);
@@ -372,15 +381,18 @@ export default function ProductPublishQueue({
         .catch(async (error: unknown) => {
           const errorMessage = error instanceof Error ? error.message : "Product publishing failed.";
           console.error(`Unable to process queued product ${job.id}.`, error);
-          await updateLocalProductPublishJob(job.id, { state: "failed", errorMessage });
-          await refreshLocalJobs();
+          try {
+            await updateLocalJob(job.id, { state: "failed", errorMessage });
+          } catch (persistError) {
+            console.error(`Unable to save failure state for queued product ${job.id}.`, persistError);
+            setQueueError("A product failed and its failure status could not be saved locally.");
+          }
         })
         .finally(() => {
           inFlight.current.delete(job.id);
-          void refreshLocalJobs();
         });
     }
-  }, [isLoaded, isOnline, localJobs, processJob, refreshLocalJobs]);
+  }, [isLoaded, isOnline, localJobs, processJob, updateLocalJob]);
 
   const displayJobs = useMemo(() => {
     const localIds = new Set(localJobs.map((job) => job.id));

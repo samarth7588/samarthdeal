@@ -55,9 +55,6 @@ export async function enqueueProductPublishJob(input: {
   rating: string;
 }) {
   try {
-    const { user, isAuthorized } = await getAdminSession(AbortSignal.timeout(15_000));
-    if (!user || !isAuthorized) return queueError("Your admin session is not authorized to enqueue products.");
-
     const storageBucket = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET;
     if (!storageBucket || !isConfiguredStorageImage(input.imageUrl, storageBucket)) {
       return queueError("The product image is not saved in the configured storage bucket.");
@@ -81,6 +78,13 @@ export async function enqueueProductPublishJob(input: {
     }
 
     const supabase = await createSupabaseServerClient(AbortSignal.timeout(15_000));
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError) {
+      logSupabaseError("Unable to authenticate product queue insertion.", authError);
+      return queueError("Unable to verify your admin session for product publishing.");
+    }
+    if (!user) return queueError("Your admin session is not authorized to enqueue products.");
+
     const { error } = await supabase.from("product_publish_jobs").insert({
       id: input.id,
       image_url: input.imageUrl,
@@ -116,10 +120,14 @@ export async function enqueueProductPublishJob(input: {
 
 export async function getProductPublishJobs() {
   try {
-    const { user, isAuthorized } = await getAdminSession(AbortSignal.timeout(15_000));
-    if (!user || !isAuthorized) return { errorMessage: "Your admin session is not authorized.", jobs: [] };
-
     const supabase = await createSupabaseServerClient(AbortSignal.timeout(15_000));
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError) {
+      logSupabaseError("Unable to authenticate product queue retrieval.", authError);
+      return { errorMessage: "Unable to verify your admin session.", jobs: [] };
+    }
+    if (!user) return { errorMessage: "Your admin session is not authorized.", jobs: [] };
+
     const { data, error } = await supabase
       .from("product_publish_jobs")
       .select("id, image_url, description, state, attempts, last_error, created_at, updated_at, published_at")
