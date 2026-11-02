@@ -93,9 +93,6 @@ export default function Header({
             placeholder="Search deals, prices or products..."
           />
         </label>
-        <p className="mt-2 text-xs font-medium leading-5 text-amber-800 sm:text-sm">
-          ⚠️ Always open the order link first to check slot availability. This applies only to Jayshakthi Deal.
-        </p>
       </div>
     </header>
   );

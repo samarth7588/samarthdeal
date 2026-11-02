@@ -10,11 +10,21 @@ import {
   nullablePrice,
   parseProductPostMessage,
 } from "../../_lib/product-post-parser";
+import type { AdminProductPost } from "../../_lib/admin-product-posts";
 import type { CreateDealState } from "./state";
 
 const postStatuses = ["draft", "live", "over"] as const;
 type ProductPostStatus = (typeof postStatuses)[number];
 const publishTimeoutMs = 20_000;
+
+async function timeOperation<T>(label: string, operation: () => PromiseLike<T>): Promise<T> {
+  console.time(label);
+  try {
+    return await operation();
+  } finally {
+    console.timeEnd(label);
+  }
+}
 
 function textValue(formData: FormData, name: string) {
   const value = formData.get(name);
@@ -41,17 +51,17 @@ function validHttpUrl(value: string) {
   }
 }
 
-function validatePost(formData: FormData) {
+function validatePost(formData: FormData, metadata: ReturnType<typeof metadataForPublish>) {
   const imageUrl = textValue(formData, "imageUrl");
   const description = rawTextValue(formData, "details");
   const status = textValue(formData, "status");
-  const productName = textValue(formData, "productName");
-  const brand = textValue(formData, "brand");
-  const platform = textValue(formData, "platform");
-  const orderPrice = priceValue(textValue(formData, "orderPrice"));
-  const lessPrice = priceValue(textValue(formData, "lessPrice"));
+  const productName = metadata.productName;
+  const brand = metadata.brand;
+  const platform = metadata.platform;
+  const orderPrice = metadata.orderPrice;
+  const lessPrice = metadata.lessPrice;
+  const rating = metadata.rating;
   const ratingText = textValue(formData, "rating");
-  const rating = ratingText ? Number(ratingText) : null;
   const validRating = ratingText === "" || (rating !== null && Number.isFinite(rating) && rating >= 0 && rating <= 5);
   const fieldErrors: Record<string, string> = {};
 
@@ -73,7 +83,7 @@ function unauthorized(message: string): CreateDealState {
   return { errorMessage: message, successMessage: null, fieldErrors: {} };
 }
 
-async function metadataForPublish(formData: FormData, description: string) {
+function metadataForPublish(formData: FormData, description: string) {
   const parsed = parseProductPostMessage(description);
   const submittedProductName = textValue(formData, "productName");
   const submittedBrand = textValue(formData, "brand");
@@ -110,10 +120,47 @@ function unexpectedActionError(error: unknown, operation: "publish" | "update") 
   return unauthorized(`We could not ${operation} this product post. Check the server log for details.`);
 }
 
+function validPublishId(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isDuplicatePublishId(error: unknown, id: string) {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; details?: unknown; message?: unknown };
+  const details = typeof value.details === "string" ? value.details : "";
+  const message = typeof value.message === "string" ? value.message : "";
+  return value.code === "23505" && (
+    details.includes(`(id)=(${id})`) ||
+    message.includes("product_posts_pkey")
+  );
+}
+
+function publishedPost(id: string, values: ReturnType<typeof validatePost>["values"]): AdminProductPost {
+  const now = new Date().toISOString();
+  return {
+    id,
+    image_url: values.imageUrl,
+    description: values.description,
+    product_name: values.productName,
+    brand: values.brand,
+    platform: values.platform,
+    order_price: values.orderPrice,
+    less_price: values.lessPrice,
+    rating: values.rating,
+    serial_number: null,
+    published_at: null,
+    status: values.status,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
 export async function createProductPostAction(_previousState: CreateDealState, formData: FormData): Promise<CreateDealState> {
   const timeoutSignal = AbortSignal.timeout(publishTimeoutMs);
+  const timingId = crypto.randomUUID();
+  console.time(`product-publish-server:${timingId}`);
   try {
-    const result = await createProductPost(formData, timeoutSignal);
+    const result = await createProductPost(formData, timeoutSignal, timingId);
     if (timeoutSignal.aborted) {
       return unauthorized("Publishing took too long. Check the product list before trying again.");
     }
@@ -124,35 +171,42 @@ export async function createProductPostAction(_previousState: CreateDealState, f
       return unauthorized("Publishing took too long. Check the product list before trying again.");
     }
     return unexpectedActionError(error, "publish");
+  } finally {
+    console.timeEnd(`product-publish-server:${timingId}`);
   }
 }
 
-async function createProductPost(formData: FormData, timeoutSignal: AbortSignal): Promise<CreateDealState> {
-  const { user, isAuthorized } = await getAdminSession(timeoutSignal);
+async function createProductPost(formData: FormData, timeoutSignal: AbortSignal, timingId: string): Promise<CreateDealState> {
+  const { user, isAuthorized } = await timeOperation(
+    `product-publish-admin-auth:${timingId}`,
+    () => getAdminSession(timeoutSignal),
+  );
   if (!user) return unauthorized("Your session has expired. Please sign in again.");
   if (!isAuthorized) return unauthorized("You are not authorized to publish product posts.");
 
   const description = rawTextValue(formData, "details");
-  const extracted = await metadataForPublish(formData, description);
-  const enriched = new FormData();
-  for (const [name, value] of formData.entries()) enriched.append(name, value);
-  enriched.set("details", description);
-  enriched.set("productName", extracted.productName);
-  enriched.set("brand", extracted.brand ?? "");
-  enriched.set("platform", extracted.platform ?? "");
-  enriched.set("orderPrice", extracted.orderPrice === null ? "" : String(extracted.orderPrice));
-  enriched.set("lessPrice", extracted.lessPrice === null ? "" : String(extracted.lessPrice));
-  enriched.set("rating", extracted.rating === null ? "" : String(extracted.rating));
-  const { fieldErrors, values } = validatePost(enriched);
+  console.time(`product-publish-caption-parse:${timingId}`);
+  const extracted = metadataForPublish(formData, description);
+  console.timeEnd(`product-publish-caption-parse:${timingId}`);
+  const { fieldErrors, values } = validatePost(formData, extracted);
   if (Object.keys(fieldErrors).length > 0) return { errorMessage: "Please correct the highlighted fields.", successMessage: null, fieldErrors };
+
+  const publishId = textValue(formData, "publishId");
+  if (!validPublishId(publishId)) {
+    return unauthorized("The publishing request is invalid. Please try again.");
+  }
 
   const storageBucket = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET;
   if (!storageBucket || !values.imageUrl.includes(`/storage/v1/object/public/${storageBucket}/`)) {
     return unauthorized("The image must be uploaded to the configured product-images bucket before publishing.");
   }
 
-  const supabase = await createSupabaseServerClient(timeoutSignal);
+  const supabase = await timeOperation(
+    `product-publish-supabase-client:${timingId}`,
+    () => createSupabaseServerClient(timeoutSignal),
+  );
   const fullPayload = {
+    id: publishId,
     image_url: values.imageUrl,
     description: values.description,
     status: values.status,
@@ -163,10 +217,15 @@ async function createProductPost(formData: FormData, timeoutSignal: AbortSignal)
     less_price: values.lessPrice,
     rating: values.rating,
   };
-  let { error } = await supabase.from("product_posts").insert(fullPayload);
+  const fullAttempt = await timeOperation(
+    `product-publish-database-insert:${timingId}`,
+    () => supabase.from("product_posts").insert(fullPayload),
+  );
+  let error = fullAttempt.error;
 
   if (error && classifySupabaseError(error) === "missing-column") {
     const metadataPayload = {
+      id: publishId,
       image_url: values.imageUrl,
       description: values.description,
       status: values.status,
@@ -176,17 +235,35 @@ async function createProductPost(formData: FormData, timeoutSignal: AbortSignal)
       order_price: values.orderPrice,
       less_price: values.lessPrice,
     };
-    const metadataAttempt = await supabase.from("product_posts").insert(metadataPayload);
+    const metadataAttempt = await timeOperation(
+      `product-publish-database-metadata-fallback:${timingId}`,
+      () => supabase.from("product_posts").insert(metadataPayload),
+    );
     error = metadataAttempt.error;
   }
 
   if (error && classifySupabaseError(error) === "missing-column") {
-    const baseAttempt = await supabase.from("product_posts").insert({
-      image_url: values.imageUrl,
-      description: values.description,
-      status: values.status,
-    });
+    const baseAttempt = await timeOperation(
+      `product-publish-database-base-fallback:${timingId}`,
+      () => supabase.from("product_posts").insert({
+        id: publishId,
+        image_url: values.imageUrl,
+        description: values.description,
+        status: values.status,
+      }),
+    );
     error = baseAttempt.error;
+  }
+
+  if (error && isDuplicatePublishId(error, publishId)) {
+    revalidatePath("/");
+    if (values.status !== "draft") revalidatePath(`/products/${publishId}`);
+    return {
+      errorMessage: null,
+      successMessage: "Product published successfully.",
+      fieldErrors: {},
+      publishedPost: publishedPost(publishId, values),
+    };
   }
 
   if (error) {
@@ -195,9 +272,13 @@ async function createProductPost(formData: FormData, timeoutSignal: AbortSignal)
   }
 
   revalidatePath("/");
-  revalidatePath("/admin");
-  revalidatePath("/admin/create-deal");
-  return { errorMessage: null, successMessage: "Product published successfully.", fieldErrors: {} };
+  if (values.status !== "draft") revalidatePath(`/products/${publishId}`);
+  return {
+    errorMessage: null,
+    successMessage: "Product published successfully.",
+    fieldErrors: {},
+    publishedPost: publishedPost(publishId, values),
+  };
 }
 
 export async function updateProductPostAction(_previousState: CreateDealState, formData: FormData): Promise<CreateDealState> {
@@ -215,17 +296,8 @@ async function updateProductPost(formData: FormData): Promise<CreateDealState> {
 
   const id = textValue(formData, "postId");
   const description = rawTextValue(formData, "details");
-  const extracted = await metadataForPublish(formData, description);
-  const enriched = new FormData();
-  for (const [name, value] of formData.entries()) enriched.append(name, value);
-  enriched.set("details", description);
-  enriched.set("productName", extracted.productName);
-  enriched.set("brand", extracted.brand ?? "");
-  enriched.set("platform", extracted.platform ?? "");
-  enriched.set("orderPrice", extracted.orderPrice === null ? "" : String(extracted.orderPrice));
-  enriched.set("lessPrice", extracted.lessPrice === null ? "" : String(extracted.lessPrice));
-  enriched.set("rating", extracted.rating === null ? "" : String(extracted.rating));
-  const { fieldErrors, values } = validatePost(enriched);
+  const extracted = metadataForPublish(formData, description);
+  const { fieldErrors, values } = validatePost(formData, extracted);
   if (!id) return unauthorized("A product post id is required.");
   if (Object.keys(fieldErrors).length > 0) return { errorMessage: "Please correct the highlighted fields.", successMessage: null, fieldErrors };
 

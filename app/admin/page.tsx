@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { getAdminSession } from "../_lib/admin-auth";
 import { getAdminProductPosts } from "../_lib/admin-product-posts";
 import AdminProductManager from "./admin-product-manager";
 import LogoutButton from "./logout-button";
+import ViewSiteButton from "./view-site-button";
 
 export const dynamic = "force-dynamic";
 
@@ -31,12 +31,7 @@ export default async function AdminPage() {
             <p className="mt-2 text-sm text-slate-600">Signed in as an authorized administrator</p>
           </div>
           <div className="flex items-center gap-3">
-            <Link
-              className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-5 text-sm font-bold text-slate-700 transition hover:border-slate-400 hover:text-slate-950 focus:outline-none focus:ring-4 focus:ring-slate-950/10"
-              href="/"
-            >
-              View site
-            </Link>
+            <ViewSiteButton />
             <LogoutButton />
           </div>
         </header>

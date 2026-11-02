@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useDeferredValue, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import type { AdminProductPost } from "../_lib/admin-product-posts";
@@ -11,11 +11,12 @@ import {
   setProductPostStatusAction,
 } from "./create-deal/product-post-actions";
 import { getJayShakthiOrderFormUrl } from "../_lib/order-form-slots";
-import { productRetailerLinks } from "../_lib/product-links";
+import { productPlatformLink } from "../_lib/product-links";
 import { assignProductSerialNumbers } from "../_lib/product-post-serial-numbers";
 import { formatPrice } from "../_lib/formatters";
 import { numericPrice } from "../_lib/pricing";
 import ProductPostSlotCount from "../_components/product-post-slot-count";
+import ProductPublishQueue from "./create-deal/product-publish-queue";
 
 function StatusButton({
   postId,
@@ -64,41 +65,65 @@ export default function AdminProductManager({
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  const [visibleCounts, setVisibleCounts] = useState({
+    live: 40,
+    over: 40,
+    draft: 40,
+  });
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [autoStatusError, setAutoStatusError] = useState<string | null>(null);
   const statusUpdatesInProgress = useRef(new Set<string>());
-  const normalizedQuery = query.trim().toLowerCase();
+  const queueProductRef = useRef<((formData: FormData, imageFile: File) => Promise<void>) | null>(null);
+  const normalizedQuery = useDeferredValue(query.trim().toLowerCase());
   const editingPost = posts.find((post) => post.id === editingPostId) ?? null;
   const serialNumbers = useMemo(() => assignProductSerialNumbers(posts), [posts]);
-  const matchesSearch = useCallback((post: AdminProductPost) => {
-    if (!normalizedQuery) return true;
-    return [
+  const searchableText = useMemo(() => new Map(posts.map((post) => [
+    post.id,
+    [
       post.description,
+      post.product_name,
+      post.brand,
       post.platform,
       post.order_price,
       post.less_price,
+      post.rating,
       post.image_url,
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(normalizedQuery);
-  }, [normalizedQuery]);
+    ].join(" ").toLowerCase(),
+  ])), [posts]);
+  const matchesSearch = useCallback((post: AdminProductPost) => {
+    if (!normalizedQuery) return true;
+    return searchableText.get(post.id)?.includes(normalizedQuery) ?? false;
+  }, [normalizedQuery, searchableText]);
   const livePosts = useMemo(
     () => posts.filter((post) => post.status === "live" && matchesSearch(post)),
-    [matchesSearch, posts],
+    [posts, matchesSearch],
   );
   const overPosts = useMemo(
     () => posts.filter((post) => post.status === "over" && matchesSearch(post)),
-    [matchesSearch, posts],
+    [posts, matchesSearch],
   );
   const draftPosts = useMemo(
     () => posts.filter((post) => post.status === "draft" && matchesSearch(post)),
-    [matchesSearch, posts],
+    [posts, matchesSearch],
   );
   const onSaved = useCallback(() => {
     setEditingPostId(null);
     router.refresh();
   }, [router]);
+  const onPublished = useCallback(() => {
+    router.refresh();
+  }, [router]);
+  const setQueueProduct = useCallback((
+    enqueue: (formData: FormData, imageFile: File) => Promise<void>,
+  ) => {
+    queueProductRef.current = enqueue;
+  }, []);
+  const queueProduct = useCallback((formData: FormData, imageFile: File) => {
+    if (!queueProductRef.current) {
+      return Promise.reject(new Error("The product queue is still loading. Please try again."));
+    }
+    return queueProductRef.current(formData, imageFile);
+  }, []);
   const syncAutoDetectedStatus = useCallback(async (
     postId: string,
     status: "live" | "over",
@@ -124,10 +149,14 @@ export default function AdminProductManager({
     }
   }, [router]);
 
-  function renderProducts(products: AdminProductPost[]) {
-    return products.map((post) => {
+  function renderProducts(products: AdminProductPost[], status: "live" | "over" | "draft") {
+    const visibleProducts = products.slice(0, visibleCounts[status]);
+
+    return (
+      <>
+      {visibleProducts.map((post) => {
       const formUrl = getJayShakthiOrderFormUrl(post.description);
-      const productLink = productRetailerLinks(post.description)[0] ?? null;
+      const productLink = productPlatformLink(post.description, post.platform);
       const serialNumber = serialNumbers.get(post.id)!;
 
       return (
@@ -147,8 +176,11 @@ export default function AdminProductManager({
             <img
               alt={`Product ${serialNumber}`}
               className="h-full w-full object-contain"
+              decoding="async"
+              height={1600}
               loading="lazy"
               src={post.image_url}
+              width={1600}
             />
           </a>
           <span
@@ -168,9 +200,6 @@ export default function AdminProductManager({
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-800">
               #{serialNumber}
             </span>
-            <h4 className="min-w-0 break-words text-sm font-bold text-slate-950">
-              {post.product_name || "Product"}
-            </h4>
             {numericPrice(post.order_price) !== null && (
               <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-800">
                 Order {formatPrice(post.order_price)}
@@ -182,16 +211,22 @@ export default function AdminProductManager({
               </span>
             )}
             {productLink?.platform && (
-              <a
-                aria-label={`Open ${productLink.platform} product link`}
-                className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800 transition hover:bg-blue-100"
-                href={productLink.url}
-                rel="noopener noreferrer"
-                target="_blank"
-                title={`Open ${productLink.platform} product link`}
-              >
-                {productLink.platform} <span aria-hidden="true">🔥</span>
-              </a>
+              productLink.url ? (
+                <a
+                  aria-label={`Open ${productLink.platform} product link`}
+                  className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800 transition hover:bg-blue-100"
+                  href={productLink.url}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                  title={`Open ${productLink.platform} product link`}
+                >
+                  {productLink.platform} <span aria-hidden="true">🔥</span>
+                </a>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-800">
+                  {productLink.platform} <span aria-hidden="true">🔥</span>
+                </span>
+              )
             )}
           </div>
           <ProductPostSlotCount
@@ -230,7 +265,21 @@ export default function AdminProductManager({
         </div>
       </article>
       );
-    });
+        })}
+      {products.length > visibleCounts[status] && (
+        <button
+          className="my-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-slate-400"
+          onClick={() => setVisibleCounts((counts) => ({
+            ...counts,
+            [status]: counts[status] + 40,
+          }))}
+          type="button"
+        >
+          Show more {status} products
+        </button>
+      )}
+      </>
+    );
   }
 
   const matchCount = livePosts.length + overPosts.length + draftPosts.length;
@@ -255,10 +304,14 @@ export default function AdminProductManager({
           <CreateDealForm
             key={editingPost?.id ?? "new-product"}
             onSaved={onSaved}
+            onPublished={onPublished}
+            onQueueProduct={queueProduct}
             post={editingPost ?? undefined}
             posts={posts}
           />
       </section>
+
+      <ProductPublishQueue onQueueProductRef={setQueueProduct} />
 
       <section className="mt-8 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-xl shadow-slate-900/5 sm:p-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -268,6 +321,9 @@ export default function AdminProductManager({
           </div>
         </div>
         {autoStatusError && <p aria-live="polite" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{autoStatusError}</p>}
+        {errorMessage && (
+          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">{errorMessage}</p>
+        )}
         <label className="relative mt-5 block w-full">
           <span className="sr-only">Search managed products</span>
           <svg
@@ -283,15 +339,16 @@ export default function AdminProductManager({
           </svg>
           <input
             className="h-12 w-full rounded-2xl border border-slate-300 bg-slate-50 py-3 pl-12 pr-4 text-sm text-slate-950 outline-none transition placeholder:text-slate-500 hover:border-blue-400 focus:border-blue-500 focus:bg-white focus:shadow-[0_0_0_4px_rgba(59,130,246,0.14)]"
-            onChange={(event) => setQuery(event.currentTarget.value)}
+            onChange={(event) => {
+              setQuery(event.currentTarget.value);
+              setVisibleCounts({ live: 40, over: 40, draft: 40 });
+            }}
             placeholder="Search captions, links, platforms or prices..."
             type="search"
             value={query}
           />
         </label>
-        {errorMessage ? (
-          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">{errorMessage}</p>
-        ) : matchCount === 0 ? (
+        {!errorMessage && matchCount === 0 ? (
           <p className="mt-5 text-sm text-slate-500">
             {normalizedQuery ? "No products found." : "No product posts have been published yet."}
           </p>
@@ -300,19 +357,19 @@ export default function AdminProductManager({
             {livePosts.length > 0 && (
               <section>
                 <h3 className="border-b border-slate-100 pb-2 text-sm font-black uppercase tracking-wide text-emerald-700">Live Deals</h3>
-                {renderProducts(livePosts)}
+                {renderProducts(livePosts, "live")}
               </section>
             )}
             {overPosts.length > 0 && (
               <section className="mt-6">
                 <h3 className="border-b border-slate-100 pb-2 text-sm font-black uppercase tracking-wide text-slate-600">Over Deals</h3>
-                {renderProducts(overPosts)}
+                {renderProducts(overPosts, "over")}
               </section>
             )}
             {draftPosts.length > 0 && (
               <section className="mt-6">
                 <h3 className="border-b border-slate-100 pb-2 text-sm font-black uppercase tracking-wide text-amber-700">Drafts</h3>
-                {renderProducts(draftPosts)}
+                {renderProducts(draftPosts, "draft")}
               </section>
             )}
           </div>

@@ -1,7 +1,6 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import {
   getOrderFormPostStatus,
@@ -21,9 +20,11 @@ import { numericPrice } from "../../_lib/pricing";
 import ProductPostSlotCount from "../../_components/product-post-slot-count";
 import { createProductPostAction, updateProductPostAction } from "./product-post-actions";
 import { initialCreateDealState, normalizeCreateDealState } from "./state";
+import { compressProductImage, imageFingerprint } from "./product-image-optimization";
 
 const acceptedTypes = ["image/jpeg", "image/png", "image/webp"];
 const maxImageSize = 5 * 1024 * 1024;
+const imageUploadTimeoutMs = 20_000;
 const emptyMetadata: ProductPostMetadata = {
   productName: "",
   brand: "",
@@ -32,6 +33,15 @@ const emptyMetadata: ProductPostMetadata = {
   lessPrice: "",
   rating: "",
 };
+
+async function timeOperation<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  console.time(label);
+  try {
+    return await operation();
+  } finally {
+    console.timeEnd(label);
+  }
+}
 
 function DuplicateProductCard({
   post,
@@ -52,7 +62,6 @@ function DuplicateProductCard({
       <p className="text-sm font-bold text-amber-900">Matching product link already exists. Publishing is still available.</p>
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-slate-800">
         <span className="rounded-full bg-white px-2.5 py-1 text-xs font-black">#{serialNumber}</span>
-        <span className="font-bold">{post.product_name || "Product"}</span>
         {price !== null && <span className="font-semibold">{formatPrice(price)}</span>}
         <span className="rounded-full bg-white px-2.5 py-1 text-xs font-bold">{platform || "Platform not specified"}</span>
         <span className={`rounded-full px-2.5 py-1 text-xs font-black ${post.status === "live" ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-700"}`}>{statusLabel}</span>
@@ -76,16 +85,19 @@ export default function CreateDealForm({
   post,
   posts = [],
   onSaved,
+  onPublished,
+  onQueueProduct,
 }: {
   post?: AdminProductPost;
   posts?: AdminProductPost[];
   onSaved?: () => void;
+  onPublished?: () => void;
+  onQueueProduct?: (formData: FormData, imageFile: File) => Promise<void>;
 }) {
   const isEditing = Boolean(post);
   const [state, setState] = useState(initialCreateDealState);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isTakingLong, setIsTakingLong] = useState(false);
-  const router = useRouter();
   const [clientError, setClientError] = useState<string | null>(null);
   const [description, setDescription] = useState(post?.description ?? "");
   const [metadata, setMetadata] = useState<ProductPostMetadata>(() => ({
@@ -99,11 +111,15 @@ export default function CreateDealForm({
   const [selectedStatus, setSelectedStatus] = useState<"draft" | "live" | "over">(post?.status ?? "live");
   const [imageUrl, setImageUrl] = useState(post?.image_url ?? "");
   const [previewUrl, setPreviewUrl] = useState<string | null>(post?.image_url ?? null);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [uploadState, setUploadState] = useState(post ? "ready" : "idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const captionRef = useRef<HTMLTextAreaElement>(null);
   const submissionInProgressRef = useRef(false);
+  const imageUploadInProgressRef = useRef(false);
+  const uploadedImagesRef = useRef(new Map<string, string>());
+  const publishIdRef = useRef<string | null>(null);
   const slotRequestRef = useRef(0);
   const slotAutoStatusAppliedRef = useRef(false);
   const safeState = normalizeCreateDealState(state);
@@ -128,7 +144,9 @@ export default function CreateDealForm({
     setSelectedStatus("live");
     setImageUrl("");
     setPreviewUrl(null);
+    setSelectedImageFile(null);
     setUploadState("idle");
+    publishIdRef.current = null;
     slotAutoStatusAppliedRef.current = false;
     setClientError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -157,6 +175,8 @@ export default function CreateDealForm({
     const requestedFormUrl = formUrl;
 
     async function checkOrderFormSlots() {
+      const timingLabel = `product-slot-detection:${crypto.randomUUID()}`;
+      console.time(timingLabel);
       try {
         const response = await fetch(
           `/api/product-post-slots?url=${encodeURIComponent(requestedFormUrl)}`,
@@ -176,6 +196,8 @@ export default function CreateDealForm({
         slotAutoStatusAppliedRef.current = true;
       } catch {
         // Slot detection is optional and must not interrupt publishing.
+      } finally {
+        console.timeEnd(timingLabel);
       }
     }
 
@@ -202,6 +224,7 @@ export default function CreateDealForm({
 
   async function uploadImage(file: File) {
     setClientError(null);
+    if (imageUploadInProgressRef.current || submissionInProgressRef.current) return;
     if (!acceptedTypes.includes(file.type)) {
       setClientError("Choose a JPG, PNG, or WebP image.");
       return;
@@ -212,42 +235,71 @@ export default function CreateDealForm({
     }
 
     setPreviewUrl(URL.createObjectURL(file));
+    setSelectedImageFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (!isEditing) {
+      setImageUrl("");
+      setUploadState("ready");
+      return;
+    }
     if (!storageBucket) {
       setUploadState("missing-config");
       setClientError("Image upload is unavailable until NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET is configured.");
       return;
     }
 
-    const supabase = createSupabaseBrowserClient();
-    const { data: authData, error: authError } = await supabase.auth.getUser();
-    if (authError || !authData.user) {
-      setClientError("Your session has expired. Please sign in again.");
-      return;
-    }
-
-    const { data: adminUser, error: authorizationError } = await supabase
-      .from("admin_users")
-      .select("user_id")
-      .eq("user_id", authData.user.id)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (authorizationError || !adminUser) {
-      setClientError("You are not authorized to upload product images.");
-      return;
-    }
-
+    imageUploadInProgressRef.current = true;
     setUploadState("uploading");
-    const path = `admin-products/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
-    const { error } = await supabase.storage.from(storageBucket).upload(path, file, { contentType: file.type, upsert: false });
-    if (error) {
-      setUploadState("error");
-      setClientError(`Image upload failed: ${error.message}`);
-      return;
-    }
+    const timingId = crypto.randomUUID();
+    console.time(`product-image-upload:${timingId}`);
+    try {
+      const fingerprint = await timeOperation(
+        `product-image-fingerprint:${timingId}`,
+        () => imageFingerprint(file),
+      );
+      const existingUrl = uploadedImagesRef.current.get(fingerprint);
+      if (existingUrl) {
+        setImageUrl(existingUrl);
+        setUploadState("ready");
+        return;
+      }
 
-    const { data } = supabase.storage.from(storageBucket).getPublicUrl(path);
-    setImageUrl(data.publicUrl);
-    setUploadState("ready");
+      const compressedFile = await timeOperation(
+        `product-image-compression:${timingId}`,
+        () => compressProductImage(file),
+      );
+      const extension = compressedFile.type === "image/webp"
+        ? "webp"
+        : compressedFile.type === "image/png"
+          ? "png"
+          : "jpg";
+      const path = `admin-products/${fingerprint}.${extension}`;
+      const supabase = createSupabaseBrowserClient(imageUploadTimeoutMs);
+      const { error } = await timeOperation(
+        `product-image-storage-upload:${timingId}`,
+        () => supabase.storage.from(storageBucket).upload(path, compressedFile, {
+          contentType: compressedFile.type,
+          cacheControl: "31536000",
+          upsert: true,
+        }),
+      );
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      const { data } = supabase.storage.from(storageBucket).getPublicUrl(path);
+      uploadedImagesRef.current.set(fingerprint, data.publicUrl);
+      setImageUrl(data.publicUrl);
+      setUploadState("ready");
+    } catch (error) {
+      setUploadState("error");
+      const message = error instanceof Error ? error.message : "Unknown image upload error.";
+      console.error("Unable to process or upload product image.", error);
+      setClientError(`Image upload failed: ${message}`);
+    } finally {
+      imageUploadInProgressRef.current = false;
+      console.timeEnd(`product-image-upload:${timingId}`);
+    }
   }
 
   function updateDescription(nextDescription: string) {
@@ -264,10 +316,28 @@ export default function CreateDealForm({
     setIsTakingLong(false);
     setClientError(null);
     setState(initialCreateDealState);
-    const slowRequestTimer = window.setTimeout(() => setIsTakingLong(true), 8_000);
+    const timingId = crypto.randomUUID();
+    console.time(`product-publish-client:${timingId}`);
+    const slowRequestTimer = isEditing
+      ? window.setTimeout(() => setIsTakingLong(true), 8_000)
+      : null;
 
     try {
       const formData = new FormData(event.currentTarget);
+      if (!isEditing) {
+        if (!selectedImageFile) throw new Error("Choose a product image before adding it to the queue.");
+        if (!onQueueProduct) throw new Error("The persistent product queue is unavailable.");
+        await onQueueProduct(formData, selectedImageFile);
+        setState({
+          errorMessage: null,
+          successMessage: "Product added to the publishing queue.",
+          fieldErrors: {},
+        });
+        resetFormState();
+        return;
+      }
+      publishIdRef.current ??= crypto.randomUUID();
+      formData.set("publishId", publishIdRef.current);
       const action = isEditing ? updateProductPostAction : createProductPostAction;
       const result = await action(state, formData);
       setState(result);
@@ -275,8 +345,8 @@ export default function CreateDealForm({
         if (isEditing) {
           onSaved?.();
         } else {
+          if (result.publishedPost) onPublished?.();
           resetFormState();
-          router.refresh();
         }
       }
     } catch (error) {
@@ -287,14 +357,15 @@ export default function CreateDealForm({
         fieldErrors: {},
       });
     } finally {
-      window.clearTimeout(slowRequestTimer);
+      if (slowRequestTimer !== null) window.clearTimeout(slowRequestTimer);
       submissionInProgressRef.current = false;
       setIsPublishing(false);
       setIsTakingLong(false);
+      console.timeEnd(`product-publish-client:${timingId}`);
     }
   }
 
-  const hasImage = Boolean(imageUrl);
+  const hasImage = Boolean(imageUrl || selectedImageFile);
   const hasDescription = Boolean(description.trim());
 
   return (
@@ -309,17 +380,18 @@ export default function CreateDealForm({
       <div>
         <label className="text-sm font-bold text-slate-800" htmlFor="productImage">Product image</label>
         <button
-          className="mt-2 flex min-h-56 w-full flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50 px-5 text-center transition hover:border-emerald-500 hover:bg-emerald-50/30 focus:outline-none focus:ring-4 focus:ring-emerald-500/15"
+          className="mt-2 flex min-h-56 w-full flex-col items-center justify-center rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50 px-5 text-center transition hover:border-emerald-500 hover:bg-emerald-50/30 focus:outline-none focus:ring-4 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60"
           onClick={() => fileInputRef.current?.click()}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void uploadImage(file); }}
+          disabled={isPublishing || uploadState === "uploading"}
           type="button"
         >
           {previewUrl ? <img alt="Selected product preview" className="h-36 max-w-full rounded-xl object-contain" src={previewUrl} /> : <span className="text-4xl">&#128444;</span>}
-          <span className="mt-3 text-base font-semibold text-slate-800">{uploadState === "uploading" ? "Uploading image..." : "Drag a product image here"}</span>
+          <span className="mt-3 text-base font-semibold text-slate-800">{uploadState === "uploading" ? "Uploading image..." : selectedImageFile && !isEditing ? "Image saved locally for queue" : "Drag a product image here"}</span>
           <span className="mt-1 text-sm text-slate-500">or tap to choose from your phone</span>
         </button>
-        <input ref={fileInputRef} accept="image/jpeg,image/png,image/webp" className="sr-only" id="productImage" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} type="file" />
+        <input ref={fileInputRef} accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={isPublishing || uploadState === "uploading"} id="productImage" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} type="file" />
         <input name="imageUrl" type="hidden" value={imageUrl} />
         {!storageBucket && <p className="mt-2 text-xs font-medium text-amber-700">Uploads are disabled until a Supabase Storage bucket is configured.</p>}
         {safeState.fieldErrors.imageUrl && <p className="mt-2 text-xs font-medium text-rose-700">{safeState.fieldErrors.imageUrl}</p>}
@@ -334,6 +406,7 @@ export default function CreateDealForm({
           className="mt-2 min-h-44 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-4 focus:ring-emerald-500/10"
           id="details"
           name="details"
+          disabled={isPublishing}
           required
           placeholder="Paste the product links or details here (brand, code, platform, price, mediator, links...)"
           onChange={(event) => {
@@ -358,8 +431,8 @@ export default function CreateDealForm({
 
       <input name="status" type="hidden" value={selectedStatus} />
 
-      <button className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-950 px-4 text-base font-extrabold uppercase text-white shadow-lg shadow-slate-950/15 transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-950/20 disabled:cursor-not-allowed disabled:opacity-60" disabled={isPublishing || uploadState === "uploading" || !hasImage || !hasDescription} type="submit">{isPublishing ? (isEditing ? "Saving changes..." : "Publishing product...") : (isEditing ? "Save Changes" : "Publish Product")}</button>
-      {isPublishing && isTakingLong && <p aria-live="polite" className="text-center text-sm font-medium text-slate-600">This is taking longer than usual. Please wait; publishing will time out after 20 seconds if the server does not respond.</p>}
+      <button className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-950 px-4 text-base font-extrabold uppercase text-white shadow-lg shadow-slate-950/15 transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-950/20 disabled:cursor-not-allowed disabled:opacity-60" disabled={isPublishing || uploadState === "uploading" || (isEditing && uploadState === "error") || !(isEditing ? hasImage : Boolean(selectedImageFile)) || !hasDescription} type="submit">{isPublishing ? (isEditing ? "Saving changes..." : "Adding to queue...") : (isEditing ? "Save Changes" : "Add to Queue")}</button>
+      {isPublishing && isTakingLong && <p aria-live="polite" className="text-center text-sm font-medium text-slate-600">Saving the product changes is taking longer than expected.</p>}
     </form>
     {duplicateMatch && (
       <DuplicateProductCard

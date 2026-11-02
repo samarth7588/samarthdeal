@@ -14,7 +14,7 @@ import {
   parseProductPostMessage,
 } from "./product-post-parser.ts";
 import { resolveProductPostMetadata } from "./product-post-metadata.ts";
-import { firstProductOrderLink } from "./product-links.ts";
+import { firstProductOrderLink, productPlatformLink } from "./product-links.ts";
 
 export type ProductPost = {
   id: string;
@@ -81,6 +81,7 @@ async function normalizePost(
   } = {},
 ): Promise<ProductPost> {
   const description = String(row.description);
+  const storedPlatform = typeof row.platform === "string" ? row.platform.trim() : "";
 
   const parsed = parseProductPostMessage(description);
 
@@ -250,7 +251,7 @@ async function normalizePost(
       validBrand || null,
 
     platform:
-      productLink?.platform || null,
+      storedPlatform || productPlatformLink(description)?.platform || productLink?.platform || null,
 
     order_price:
       nullablePrice(parsed.orderPrice) ??

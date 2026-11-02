@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   identifyProductOrderUrl,
+  productPlatformLink,
   productRetailerLinks,
   productOrderLinksInDescription,
 } from "../app/_lib/product-links.ts";
@@ -69,6 +70,34 @@ test("recognizes Flipkart and Blinkit product links for platform badges", () => 
   assert.equal(flipkart.platform, "Flipkart");
   assert.ok(blinkit);
   assert.equal(blinkit.platform, "Blinkit");
+});
+
+test("shows a known platform name when only the saved platform is available", () => {
+  assert.deepEqual(productPlatformLink("Product details", "Flipkart"), {
+    url: "",
+    platform: "Flipkart",
+    identity: "flipkart",
+  });
+});
+
+test("shows Flipkart from the product caption when no platform column is available", () => {
+  const link = productPlatformLink("Platform: Flipkart\nProduct details");
+  assert.equal(link?.platform, "Flipkart");
+  assert.equal(link?.url, "");
+});
+
+test("infers one shopping platform from a caption URL when no saved badge exists", () => {
+  const link = productPlatformLink("https://www.flipkart.com/brand/item-name");
+  assert.equal(link?.platform, "Flipkart");
+});
+
+test("does not guess between multiple shopping platforms", () => {
+  assert.equal(
+    productPlatformLink(
+      "https://www.flipkart.com/brand/item-name\nhttps://www.myntra.com/product-name",
+    ),
+    null,
+  );
 });
 
 test("selects only the explicitly labeled product link from multiple retailer URLs", () => {
