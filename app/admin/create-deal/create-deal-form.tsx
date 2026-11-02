@@ -84,6 +84,7 @@ export default function CreateDealForm({
   const isEditing = Boolean(post);
   const [state, setState] = useState(initialCreateDealState);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isTakingLong, setIsTakingLong] = useState(false);
   const router = useRouter();
   const [clientError, setClientError] = useState<string | null>(null);
   const [description, setDescription] = useState(post?.description ?? "");
@@ -99,7 +100,6 @@ export default function CreateDealForm({
   const [imageUrl, setImageUrl] = useState(post?.image_url ?? "");
   const [previewUrl, setPreviewUrl] = useState<string | null>(post?.image_url ?? null);
   const [uploadState, setUploadState] = useState(post ? "ready" : "idle");
-  const [slotDetectionState, setSlotDetectionState] = useState<"idle" | "checking" | "ready" | "unavailable">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const captionRef = useRef<HTMLTextAreaElement>(null);
@@ -129,7 +129,6 @@ export default function CreateDealForm({
     setImageUrl("");
     setPreviewUrl(null);
     setUploadState("idle");
-    setSlotDetectionState("idle");
     slotAutoStatusAppliedRef.current = false;
     setClientError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -148,7 +147,6 @@ export default function CreateDealForm({
     if (!formUrl) {
       const resetTimer = window.setTimeout(() => {
         if (slotRequestRef.current !== requestId) return;
-        setSlotDetectionState("idle");
         if (slotAutoStatusAppliedRef.current) setSelectedStatus(post?.status ?? "live");
         slotAutoStatusAppliedRef.current = false;
       }, 0);
@@ -164,12 +162,7 @@ export default function CreateDealForm({
           `/api/product-post-slots?url=${encodeURIComponent(requestedFormUrl)}`,
           { signal: controller.signal },
         );
-        if (!response.ok) {
-          if (slotRequestRef.current === requestId) {
-            setSlotDetectionState("unavailable");
-          }
-          return;
-        }
+        if (!response.ok) return;
 
         const result = (await response.json()) as {
           slots: OrderFormSlotAvailability | null;
@@ -177,24 +170,17 @@ export default function CreateDealForm({
         if (slotRequestRef.current !== requestId) return;
 
         const status = getOrderFormPostStatus(result.slots);
-        if (!status || !result.slots) {
-          setSlotDetectionState("unavailable");
-          return;
-        }
+        if (!status || !result.slots) return;
 
         setSelectedStatus(status);
         slotAutoStatusAppliedRef.current = true;
-        setSlotDetectionState("ready");
       } catch {
-        if (!controller.signal.aborted && slotRequestRef.current === requestId) {
-          setSlotDetectionState("unavailable");
-        }
+        // Slot detection is optional and must not interrupt publishing.
       }
     }
 
     const timeoutId = window.setTimeout(() => {
       if (slotRequestRef.current !== requestId) return;
-      setSlotDetectionState("checking");
       if (slotAutoStatusAppliedRef.current) setSelectedStatus(post?.status ?? "live");
       slotAutoStatusAppliedRef.current = false;
       void checkOrderFormSlots();
@@ -275,8 +261,10 @@ export default function CreateDealForm({
 
     submissionInProgressRef.current = true;
     setIsPublishing(true);
+    setIsTakingLong(false);
     setClientError(null);
     setState(initialCreateDealState);
+    const slowRequestTimer = window.setTimeout(() => setIsTakingLong(true), 8_000);
 
     try {
       const formData = new FormData(event.currentTarget);
@@ -299,8 +287,10 @@ export default function CreateDealForm({
         fieldErrors: {},
       });
     } finally {
+      window.clearTimeout(slowRequestTimer);
       submissionInProgressRef.current = false;
       setIsPublishing(false);
+      setIsTakingLong(false);
     }
   }
 
@@ -368,7 +358,8 @@ export default function CreateDealForm({
 
       <input name="status" type="hidden" value={selectedStatus} />
 
-      <button className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-950 px-4 text-base font-extrabold uppercase text-white shadow-lg shadow-slate-950/15 transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-950/20 disabled:cursor-not-allowed disabled:opacity-60" disabled={isPublishing || uploadState === "uploading" || slotDetectionState === "checking" || !hasImage || !hasDescription} type="submit">{isPublishing ? (isEditing ? "Saving changes..." : "Publishing product...") : (isEditing ? "Save Changes" : "Publish Product")}</button>
+      <button className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-950 px-4 text-base font-extrabold uppercase text-white shadow-lg shadow-slate-950/15 transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-950/20 disabled:cursor-not-allowed disabled:opacity-60" disabled={isPublishing || uploadState === "uploading" || !hasImage || !hasDescription} type="submit">{isPublishing ? (isEditing ? "Saving changes..." : "Publishing product...") : (isEditing ? "Save Changes" : "Publish Product")}</button>
+      {isPublishing && isTakingLong && <p aria-live="polite" className="text-center text-sm font-medium text-slate-600">This is taking longer than usual. Please wait; publishing will time out after 20 seconds if the server does not respond.</p>}
     </form>
     {duplicateMatch && (
       <DuplicateProductCard

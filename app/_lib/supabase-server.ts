@@ -3,16 +3,18 @@ import { cookies } from "next/headers";
 
 const requestTimeoutMs = 15_000;
 
-const fetchWithTimeout: typeof fetch = (input, init) => {
-  const timeoutSignal = AbortSignal.timeout(requestTimeoutMs);
-  const signal = init?.signal
-    ? AbortSignal.any([init.signal, timeoutSignal])
-    : timeoutSignal;
+function createFetchWithTimeout(requestSignal?: AbortSignal): typeof fetch {
+  return (input, init) => {
+    const timeoutSignal = AbortSignal.timeout(requestTimeoutMs);
+    const signals = [init?.signal, requestSignal, timeoutSignal].filter(
+      (signal): signal is AbortSignal => Boolean(signal),
+    );
+    const signal = signals.length === 1 ? signals[0] : AbortSignal.any(signals);
+    return fetch(input, { ...init, signal });
+  };
+}
 
-  return fetch(input, { ...init, signal });
-};
-
-export async function createSupabaseServerClient() {
+export async function createSupabaseServerClient(requestSignal?: AbortSignal) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabasePublishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
@@ -23,7 +25,7 @@ export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
 
   return createServerClient(supabaseUrl, supabasePublishableKey, {
-    global: { fetch: fetchWithTimeout },
+    global: { fetch: createFetchWithTimeout(requestSignal) },
     cookies: {
       getAll() {
         return cookieStore.getAll();
