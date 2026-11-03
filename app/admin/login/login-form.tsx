@@ -1,12 +1,12 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { createSupabaseBrowserClient } from "../../_lib/supabase-browser";
 
+const signInTimeoutMs = 20_000;
+
 export default function LoginForm() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -17,25 +17,24 @@ export default function LoginForm() {
     setErrorMessage(null);
     setIsLoading(true);
 
-    const supabase = createSupabaseBrowserClient();
-    const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    try {
+      const supabase = createSupabaseBrowserClient(signInTimeoutMs);
+      const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
-    if (signInError || !authData.user) {
-      setErrorMessage("We could not sign you in. Check your email and password and try again.");
+      if (signInError || !authData.session) {
+        setErrorMessage("We could not sign you in. Check your email and password and try again.");
+        setIsLoading(false);
+        return;
+      }
+
+      // Full page load so the new session cookies are sent to the server, which
+      // then decides whether to show the dashboard or the access-denied page.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign("/admin");
+    } catch {
+      setErrorMessage("Sign in is taking too long or the connection failed. Please try again.");
       setIsLoading(false);
-      return;
     }
-
-    const { data: adminUser, error: authorizationError } = await supabase
-      .from("admin_users")
-      .select("user_id")
-      .eq("user_id", authData.user.id)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    setIsLoading(false);
-    router.replace(!authorizationError && adminUser ? "/admin" : "/admin/access-denied");
-    router.refresh();
   }
 
   return (
