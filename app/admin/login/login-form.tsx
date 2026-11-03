@@ -69,6 +69,12 @@ export default function LoginForm() {
         />
       </div>
 
+      <p className="-mt-2 text-right text-sm">
+        <a className="font-semibold text-slate-700 underline decoration-slate-300 underline-offset-4 hover:text-slate-950 hover:decoration-slate-950" href="/admin/forgot-password">
+          Forgot password?
+        </a>
+      </p>
+
       {errorMessage && (
         <p aria-live="polite" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
           {errorMessage}

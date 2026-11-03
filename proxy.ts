@@ -1,6 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+// Pages reachable without a session: sign-in and the password reset flow.
+const publicAdminRoutes = new Set(["/admin/login", "/admin/forgot-password", "/admin/reset-password"]);
+
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -28,7 +31,9 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser();
   const isAdminRoute = request.nextUrl.pathname.startsWith("/admin");
 
-  if (!user && isAdminRoute && request.nextUrl.pathname !== "/admin/login") {
+  const isPublicAdminRoute = publicAdminRoutes.has(request.nextUrl.pathname);
+
+  if (!user && isAdminRoute && !isPublicAdminRoute) {
     return NextResponse.redirect(new URL("/admin/login", request.url));
   }
 
