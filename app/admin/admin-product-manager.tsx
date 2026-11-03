@@ -16,7 +16,6 @@ import { assignProductSerialNumbers } from "../_lib/product-post-serial-numbers"
 import { formatPrice } from "../_lib/formatters";
 import { numericPrice } from "../_lib/pricing";
 import ProductPostSlotCount from "../_components/product-post-slot-count";
-import ProductPublishQueue from "./create-deal/product-publish-queue";
 
 function StatusButton({
   postId,
@@ -73,7 +72,6 @@ export default function AdminProductManager({
   const [editingPostId, setEditingPostId] = useState<string | null>(null);
   const [autoStatusError, setAutoStatusError] = useState<string | null>(null);
   const statusUpdatesInProgress = useRef(new Set<string>());
-  const queueProductRef = useRef<((formData: FormData, imageFile: File) => Promise<void>) | null>(null);
   const normalizedQuery = useDeferredValue(query.trim().toLowerCase());
   const editingPost = posts.find((post) => post.id === editingPostId) ?? null;
   const serialNumbers = useMemo(() => assignProductSerialNumbers(posts), [posts]);
@@ -113,17 +111,6 @@ export default function AdminProductManager({
   const onPublished = useCallback(() => {
     router.refresh();
   }, [router]);
-  const setQueueProduct = useCallback((
-    enqueue: (formData: FormData, imageFile: File) => Promise<void>,
-  ) => {
-    queueProductRef.current = enqueue;
-  }, []);
-  const queueProduct = useCallback((formData: FormData, imageFile: File) => {
-    if (!queueProductRef.current) {
-      return Promise.reject(new Error("The product queue is still loading. Please try again."));
-    }
-    return queueProductRef.current(formData, imageFile);
-  }, []);
   const syncAutoDetectedStatus = useCallback(async (
     postId: string,
     status: "live" | "over",
@@ -305,13 +292,10 @@ export default function AdminProductManager({
             key={editingPost?.id ?? "new-product"}
             onSaved={onSaved}
             onPublished={onPublished}
-            onQueueProduct={queueProduct}
             post={editingPost ?? undefined}
             posts={posts}
           />
       </section>
-
-      <ProductPublishQueue onQueueProductRef={setQueueProduct} />
 
       <section className="mt-8 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-xl shadow-slate-900/5 sm:p-8">
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -86,13 +86,11 @@ export default function CreateDealForm({
   posts = [],
   onSaved,
   onPublished,
-  onQueueProduct,
 }: {
   post?: AdminProductPost;
   posts?: AdminProductPost[];
   onSaved?: () => void;
   onPublished?: () => void;
-  onQueueProduct?: (formData: FormData, imageFile: File) => Promise<void>;
 }) {
   const isEditing = Boolean(post);
   const [state, setState] = useState(initialCreateDealState);
@@ -111,7 +109,6 @@ export default function CreateDealForm({
   const [selectedStatus, setSelectedStatus] = useState<"draft" | "live" | "over">(post?.status ?? "live");
   const [imageUrl, setImageUrl] = useState(post?.image_url ?? "");
   const [previewUrl, setPreviewUrl] = useState<string | null>(post?.image_url ?? null);
-  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [uploadState, setUploadState] = useState(post ? "ready" : "idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -144,7 +141,6 @@ export default function CreateDealForm({
     setSelectedStatus("live");
     setImageUrl("");
     setPreviewUrl(null);
-    setSelectedImageFile(null);
     setUploadState("idle");
     publishIdRef.current = null;
     slotAutoStatusAppliedRef.current = false;
@@ -235,13 +231,8 @@ export default function CreateDealForm({
     }
 
     setPreviewUrl(URL.createObjectURL(file));
-    setSelectedImageFile(file);
     if (fileInputRef.current) fileInputRef.current.value = "";
-    if (!isEditing) {
-      setImageUrl("");
-      setUploadState("ready");
-      return;
-    }
+    setImageUrl("");
     if (!storageBucket) {
       setUploadState("missing-config");
       setClientError("Image upload is unavailable until NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET is configured.");
@@ -318,24 +309,10 @@ export default function CreateDealForm({
     setState(initialCreateDealState);
     const timingId = crypto.randomUUID();
     console.time(`product-publish-client:${timingId}`);
-    const slowRequestTimer = isEditing
-      ? window.setTimeout(() => setIsTakingLong(true), 8_000)
-      : null;
+    const slowRequestTimer = window.setTimeout(() => setIsTakingLong(true), 8_000);
 
     try {
       const formData = new FormData(event.currentTarget);
-      if (!isEditing) {
-        if (!selectedImageFile) throw new Error("Choose a product image before adding it to the queue.");
-        if (!onQueueProduct) throw new Error("The persistent product queue is unavailable.");
-        await onQueueProduct(formData, selectedImageFile);
-        setState({
-          errorMessage: null,
-          successMessage: "Product added to the publishing queue.",
-          fieldErrors: {},
-        });
-        resetFormState();
-        return;
-      }
       publishIdRef.current ??= crypto.randomUUID();
       formData.set("publishId", publishIdRef.current);
       const action = isEditing ? updateProductPostAction : createProductPostAction;
@@ -357,7 +334,7 @@ export default function CreateDealForm({
         fieldErrors: {},
       });
     } finally {
-      if (slowRequestTimer !== null) window.clearTimeout(slowRequestTimer);
+      window.clearTimeout(slowRequestTimer);
       submissionInProgressRef.current = false;
       setIsPublishing(false);
       setIsTakingLong(false);
@@ -365,7 +342,7 @@ export default function CreateDealForm({
     }
   }
 
-  const hasImage = Boolean(imageUrl || selectedImageFile);
+  const hasImage = Boolean(imageUrl);
   const hasDescription = Boolean(description.trim());
 
   return (
@@ -388,7 +365,7 @@ export default function CreateDealForm({
           type="button"
         >
           {previewUrl ? <img alt="Selected product preview" className="h-36 max-w-full rounded-xl object-contain" src={previewUrl} /> : <span className="text-4xl">&#128444;</span>}
-          <span className="mt-3 text-base font-semibold text-slate-800">{uploadState === "uploading" ? "Uploading image..." : selectedImageFile && !isEditing ? "Image saved locally for queue" : "Drag a product image here"}</span>
+          <span className="mt-3 text-base font-semibold text-slate-800">{uploadState === "uploading" ? "Uploading image..." : imageUrl ? "Image ready" : "Drag a product image here"}</span>
           <span className="mt-1 text-sm text-slate-500">or tap to choose from your phone</span>
         </button>
         <input ref={fileInputRef} accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={isPublishing || uploadState === "uploading"} id="productImage" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadImage(file); }} type="file" />
@@ -431,8 +408,8 @@ export default function CreateDealForm({
 
       <input name="status" type="hidden" value={selectedStatus} />
 
-      <button className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-950 px-4 text-base font-extrabold uppercase text-white shadow-lg shadow-slate-950/15 transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-950/20 disabled:cursor-not-allowed disabled:opacity-60" disabled={isPublishing || uploadState === "uploading" || (isEditing && uploadState === "error") || !(isEditing ? hasImage : Boolean(selectedImageFile)) || !hasDescription} type="submit">{isPublishing ? (isEditing ? "Saving changes..." : "Adding to queue...") : (isEditing ? "Save Changes" : "Add to Queue")}</button>
-      {isPublishing && isTakingLong && <p aria-live="polite" className="text-center text-sm font-medium text-slate-600">Saving the product changes is taking longer than expected.</p>}
+      <button className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-slate-950 px-4 text-base font-extrabold uppercase text-white shadow-lg shadow-slate-950/15 transition hover:bg-slate-700 focus:outline-none focus:ring-4 focus:ring-slate-950/20 disabled:cursor-not-allowed disabled:opacity-60" disabled={isPublishing || uploadState === "uploading" || uploadState === "error" || !hasImage || !hasDescription} type="submit">{isPublishing ? (isEditing ? "Saving changes..." : "Publishing...") : (isEditing ? "Save Changes" : "Publish Product")}</button>
+      {isPublishing && isTakingLong && <p aria-live="polite" className="text-center text-sm font-medium text-slate-600">{isEditing ? "Saving the product changes" : "Publishing the product"} is taking longer than expected.</p>}
     </form>
     {duplicateMatch && (
       <DuplicateProductCard
